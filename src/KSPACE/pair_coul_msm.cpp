@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -112,7 +113,7 @@ void PairCoulMSM::compute(int eflag, int vflag)
           rsq_lookup.f = rsq;
           itable = rsq_lookup.i & ncoulmask;
           itable >>= ncoulshiftbits;
-          fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+          fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
           table = ftable[itable] + fraction*dftable[itable];
           forcecoul = scale[itype][jtype] * qtmp*q[j] * table;
           if (factor_coul < 1.0) {
@@ -183,7 +184,7 @@ double PairCoulMSM::single(int i, int j, int /*itype*/, int /*jtype*/,
     rsq_lookup.f = rsq;
     itable = rsq_lookup.i & ncoulmask;
     itable >>= ncoulshiftbits;
-    fraction = (rsq_lookup.f - rtable[itable]) * drtable[itable];
+    fraction = ((double) rsq_lookup.f - rtable[itable]) * drtable[itable];
     table = ftable[itable] + fraction*dftable[itable];
     forcecoul = atom->q[i]*atom->q[j] * table;
     if (factor_coul < 1.0) {

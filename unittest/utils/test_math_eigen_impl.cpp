@@ -2,6 +2,7 @@
 // (They were added to test for many different kinds of array formats.)
 
 #include "math_eigen_impl.h"
+
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -11,6 +12,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <string>
 #include <vector>
 
 using std::array;
@@ -48,7 +50,7 @@ inline static bool SimilarVec(Vector a, Vector b, int n, Scalar eps = 1.0e-06,
                               Scalar ratio = 1.0e-06, Scalar ratio_denom = 1.0)
 {
     for (int i = 0; i < n; i++)
-        if (not Similar(a[i], b[i], eps, ratio, ratio_denom)) return false;
+        if (!Similar(a[i], b[i], eps, ratio, ratio_denom)) return false;
     return true;
 }
 
@@ -61,7 +63,7 @@ inline static bool SimilarVecUnsigned(Vector a, Vector b, int n, Scalar eps = 1.
         return true;
     else {
         for (int i = 0; i < n; i++)
-            if (not Similar(a[i], -b[i], eps, ratio, ratio_denom)) return false;
+            if (!Similar(a[i], -b[i], eps, ratio, ratio_denom)) return false;
         return true;
     }
 }
@@ -385,9 +387,9 @@ void TestJacobi(int n,                         //<! matrix size
     Alloc2D(n, n, &M);
     Alloc2D(n, n, &evecs);
     Alloc2D(n, n, &evecs_known);
-    Scalar *evals       = new Scalar[n];
-    Scalar *evals_known = new Scalar[n];
-    Scalar *test_evec   = new Scalar[n];
+    auto *evals       = new Scalar[n];
+    auto *evals_known = new Scalar[n];
+    auto *test_evec   = new Scalar[n];
 
 #endif
 

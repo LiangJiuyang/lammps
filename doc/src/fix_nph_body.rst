@@ -6,7 +6,7 @@ fix nph/body command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID nph/body args keyword value ...
 
@@ -38,7 +38,7 @@ point particles and only updates their position and velocity.
 
 Additional parameters affecting the barostat are specified by keywords
 and values documented with the :doc:`fix nph <fix_nh>` command.  See,
-for example, discussion of the *aniso*\ , and *dilate* keywords.
+for example, discussion of the *aniso*, and *dilate* keywords.
 
 The particles in the fix group are the only ones whose velocities and
 positions are updated by the velocity/position update portion of the
@@ -47,7 +47,7 @@ NPH integration.
 Regardless of what particles are in the fix group, a global pressure is
 computed for all particles.  Similarly, when the size of the simulation
 box is changed, all particles are re-scaled to new positions, unless the
-keyword *dilate* is specified with a value of *partial*\ , in which case
+keyword *dilate* is specified with a value of *partial*, in which case
 only the particles in the fix group are re-scaled.  The latter can be
 useful for leaving the coordinates of particles in a solid substrate
 unchanged and controlling the pressure of a surrounding fluid.
@@ -78,8 +78,6 @@ It also means that changing attributes of *thermo_temp* or
 *thermo_press* will have no effect on this fix.
 
 ----------
-
-.. include:: accel_styles.rst
 
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -117,7 +115,7 @@ Restrictions
 """"""""""""
 
 This fix is part of the BODY package.  It is only enabled if LAMMPS
-was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 This fix requires that atoms store torque and angular momentum and a
 quaternion as defined by the :doc:`atom_style body <atom_style>`

@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -13,16 +14,17 @@
 
 #include "pair_buck.h"
 
-#include <cmath>
-#include <cstring>
 #include "atom.h"
 #include "comm.h"
 #include "force.h"
+#include "info.h"
 #include "neigh_list.h"
 #include "math_const.h"
 #include "memory.h"
 #include "error.h"
 
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
@@ -31,6 +33,7 @@ using namespace MathConst;
 
 PairBuck::PairBuck(LAMMPS *lmp) : Pair(lmp)
 {
+  born_matrix_enable = 1;
   writedata = 1;
 }
 
@@ -187,7 +190,7 @@ void PairBuck::settings(int narg, char **arg)
 void PairBuck::coeff(int narg, char **arg)
 {
   if (narg < 5 || narg > 6)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -196,7 +199,7 @@ void PairBuck::coeff(int narg, char **arg)
 
   double a_one = utils::numeric(FLERR,arg[2],false,lmp);
   double rho_one = utils::numeric(FLERR,arg[3],false,lmp);
-  if (rho_one <= 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (rho_one <= 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   double c_one = utils::numeric(FLERR,arg[4],false,lmp);
 
   double cut_one = cut_global;
@@ -214,7 +217,7 @@ void PairBuck::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -223,7 +226,9 @@ void PairBuck::coeff(int narg, char **arg)
 
 double PairBuck::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status:\n" + Info::get_pair_coeff_status(lmp));
 
   rhoinv[i][j] = 1.0/rho[i][j];
   buck1[i][j] = a[i][j]/rho[i][j];
@@ -395,6 +400,34 @@ double PairBuck::single(int /*i*/, int /*j*/, int itype, int jtype,
   phibuck = a[itype][jtype]*rexp - c[itype][jtype]*r6inv -
     offset[itype][jtype];
   return factor_lj*phibuck;
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairBuck::born_matrix(int /*i*/, int /*j*/, int itype, int jtype, double rsq,
+                            double /*factor_coul*/, double factor_lj, double &dupair,
+                            double &du2pair)
+{
+  double rinv, r2inv, r6inv, r7inv, r8inv, du, du2;
+  double r, rexp;
+
+  r = sqrt(rsq);
+  rexp = exp(-r*rhoinv[itype][jtype]);
+
+  r2inv = 1.0 / rsq;
+  rinv = sqrt(r2inv);
+  r6inv = r2inv * r2inv * r2inv;
+  r7inv = r6inv * rinv;
+  r8inv = r6inv * r2inv;
+
+  // Reminder: buck1[itype][jtype] = a[itype][jtype]/rho[itype][jtype];
+  // Reminder: buck2[itype][jtype] = 6.0*c[itype][jtype];
+
+  du = buck2[itype][jtype] * r7inv - buck1[itype][jtype] * rexp;
+  du2 = (buck1[itype][jtype] / rho[itype][jtype]) * rexp - 7 * buck2[itype][jtype] * r8inv;
+
+  dupair = factor_lj * du;
+  du2pair = factor_lj * du2;
 }
 
 /* ---------------------------------------------------------------------- */

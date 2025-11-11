@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-
-FixStyle(enforce2d/kk,FixEnforce2DKokkos<LMPDeviceType>)
-FixStyle(enforce2d/kk/device,FixEnforce2DKokkos<LMPDeviceType>)
-FixStyle(enforce2d/kk/host,FixEnforce2DKokkos<LMPHostType>)
-
+// clang-format off
+FixStyle(enforce2d/kk,FixEnforce2DKokkos<LMPDeviceType>);
+FixStyle(enforce2d/kk/device,FixEnforce2DKokkos<LMPDeviceType>);
+FixStyle(enforce2d/kk/host,FixEnforce2DKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_FIX_ENFORCE2D_KOKKOS_H
 #define LMP_FIX_ENFORCE2D_KOKKOS_H
 
@@ -30,12 +31,14 @@ namespace LAMMPS_NS {
 template<class DeviceType>
 class FixEnforce2DKokkos : public FixEnforce2D {
  public:
+  typedef ArrayTypes<DeviceType> AT;
+
   FixEnforce2DKokkos(class LAMMPS *, int, char **);
   // ~FixEnforce2DKokkos() {}
-  void setup(int);
-  void post_force(int);
+  void setup(int) override;
+  void post_force(int) override;
 
-  template <int omega_flag, int angmom_flag, int torque_flag>
+  template <int OMEGA_FLAG, int ANGMOM_FLAG, int TORQUE_FLAG>
   KOKKOS_INLINE_FUNCTION
   void post_force_item(const int i) const;
 
@@ -44,20 +47,21 @@ class FixEnforce2DKokkos : public FixEnforce2D {
   // void post_force_respa(int, int, int);  No RRESPA support yet.
 
  private:
-  typename ArrayTypes<DeviceType>::t_v_array v;
-  typename ArrayTypes<DeviceType>::t_f_array f;
+  typename AT::t_kkfloat_1d_3 v;
+  typename AT::t_kkacc_1d_3 f;
 
-  typename ArrayTypes<DeviceType>::t_v_array omega;
-  typename ArrayTypes<DeviceType>::t_v_array angmom;
-  typename ArrayTypes<DeviceType>::t_f_array torque;
+  typename AT::t_kkfloat_1d_3 omega;
+  typename AT::t_kkfloat_1d_3 angmom;
+  typename AT::t_kkacc_1d_3 torque;
 
-  typename ArrayTypes<DeviceType>::t_int_1d mask;
+  typename AT::t_int_1d mask;
 };
 
 
 template <class DeviceType, int omega_flag, int angmom_flag, int torque_flag>
 struct FixEnforce2DKokkosPostForceFunctor {
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
   FixEnforce2DKokkos<DeviceType> c;
 
   FixEnforce2DKokkosPostForceFunctor(FixEnforce2DKokkos<DeviceType>* c_ptr):
@@ -75,10 +79,3 @@ struct FixEnforce2DKokkosPostForceFunctor {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-E: Flag in fix_enforce2d_kokkos outside of what it should be
-
-LAMMPS developer-only error.
-
-*/

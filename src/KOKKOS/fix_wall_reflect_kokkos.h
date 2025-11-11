@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-
-FixStyle(wall/reflect/kk,FixWallReflectKokkos<LMPDeviceType>)
-FixStyle(wall/reflect/kk/device,FixWallReflectKokkos<LMPDeviceType>)
-FixStyle(wall/reflect/kk/host,FixWallReflectKokkos<LMPHostType>)
-
+// clang-format off
+FixStyle(wall/reflect/kk,FixWallReflectKokkos<LMPDeviceType>);
+FixStyle(wall/reflect/kk/device,FixWallReflectKokkos<LMPDeviceType>);
+FixStyle(wall/reflect/kk/host,FixWallReflectKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_FIX_WALL_REFLECT_KOKKOS_H
 #define LMP_FIX_WALL_REFLECT_KOKKOS_H
 
@@ -35,19 +36,19 @@ class FixWallReflectKokkos : public FixWallReflect {
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   FixWallReflectKokkos(class LAMMPS *, int, char **);
-  void post_integrate();
+  void post_integrate() override;
 
   KOKKOS_INLINE_FUNCTION
   void operator()(TagFixWallReflectPostIntegrate, const int&) const;
 
  protected:
-  typename AT::t_x_array x;
-  typename AT::t_v_array v;
+  typename AT::t_kkfloat_1d_3_lr x;
+  typename AT::t_kkfloat_1d_3 v;
   typename AT::t_int_1d_randomread mask;
 
 
   int dim,side;
-  X_FLOAT coord;
+  KK_FLOAT coord;
 };
 
 }
@@ -55,6 +56,3 @@ class FixWallReflectKokkos : public FixWallReflect {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-*/

@@ -1,3 +1,4 @@
+// clang-format off
 #include "math_special.h"
 
 #include <cmath>
@@ -208,7 +209,7 @@ double MathSpecial::factorial(const int n)
  *
  * Copyright:
  *   (C) 2012 Massachusetts Institute of Technology
- *   (C) 2013 Forschungszentrum Jülich GmbH
+ *   (C) 2013 Forschungszentrum Juelich GmbH
  *
  * Licence:
  *   Permission is hereby granted, free of charge, to any person obtaining
@@ -232,7 +233,7 @@ double MathSpecial::factorial(const int n)
  *
  * Authors:
  *   Steven G. Johnson, Massachusetts Institute of Technology, 2012, core author
- *   Joachim Wuttke, Forschungszentrum Jülich, 2013, package maintainer
+ *   Joachim Wuttke, Forschungszentrum Juelich, 2013, package maintainer
  *
  * Website:
  *   https://jugit.fz-juelich.de/mlz/libcerf
@@ -681,6 +682,7 @@ double MathSpecial::erfcx_y100(const double y100)
  * the result becomes: exp2(x) = exp2(ipart) * exp2(fpart)
  */
 
+// NOLINTBEGIN
 /* IEEE 754 double precision floating point data manipulation */
 typedef union
 {
@@ -688,6 +690,7 @@ typedef union
     uint64_t u;
     struct {int32_t  i0,i1;} s;
 }  udi_t;
+// NOLINTEND
 
 static const double fm_exp2_q[] = {
 /*  1.00000000000000000000e0, */
@@ -701,10 +704,11 @@ static const double fm_exp2_p[] = {
 };
 
 /* double precision constants */
-#define FM_DOUBLE_LOG2OFE  1.4426950408889634074
+static constexpr double FM_DOUBLE_LOG2OFE = 1.4426950408889634074;
 
 double MathSpecial::exp2_x86(double x)
 {
+#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
     double   ipart, fpart, px, qx;
     udi_t    epart;
 
@@ -725,6 +729,9 @@ double MathSpecial::exp2_x86(double x)
 
     x = 1.0 + 2.0*(px/(qx-px));
     return epart.f*x;
+#else
+    return pow(2.0, x);
+#endif
 }
 
 double MathSpecial::fm_exp(double x)

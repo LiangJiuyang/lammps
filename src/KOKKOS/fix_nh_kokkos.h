@@ -1,7 +1,8 @@
+// clang-format off
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -33,14 +34,15 @@ template<class DeviceType>
 class FixNHKokkos : public FixNH {
  public:
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
 
   FixNHKokkos(class LAMMPS *, int, char **);
-  virtual ~FixNHKokkos();
-  virtual void init();
-  virtual void setup(int);
-  virtual void initial_integrate(int);
-  virtual void final_integrate();
-  virtual void pre_exchange();
+
+  void init() override;
+  void setup(int) override;
+  void initial_integrate(int) override;
+  void final_integrate() override;
+  void pre_exchange() override;
 
   template<int TRICLINIC_FLAG>
   KOKKOS_INLINE_FUNCTION
@@ -57,39 +59,27 @@ class FixNHKokkos : public FixNH {
   void operator()(TagFixNH_nh_v_temp, const int&) const;
 
  protected:
-  virtual void remap();
+  void remap() override;
 
-  virtual void nve_x();            // may be overwritten by child classes
-  virtual void nve_v();
-  virtual void nh_v_press();
-  virtual void nh_v_temp();
+  void nve_x() override;            // may be overwritten by child classes
+  void nve_v() override;
+  void nh_v_press() override;
+  void nh_v_temp() override;
 
-  F_FLOAT factor[3];
+  KK_FLOAT factor[3];
 
   class DomainKokkos *domainKK;
 
-  typename ArrayTypes<DeviceType>::t_x_array x;
-  typename ArrayTypes<DeviceType>::t_v_array v;
-  typename ArrayTypes<DeviceType>::t_f_array_const f;
-  typename ArrayTypes<DeviceType>::t_float_1d rmass;
-  typename ArrayTypes<DeviceType>::t_float_1d mass;
-  typename ArrayTypes<DeviceType>::t_int_1d type;
-  typename ArrayTypes<DeviceType>::t_int_1d mask;
+  typename AT::t_kkfloat_1d_3_lr x;
+  typename AT::t_kkfloat_1d_3 v;
+  typename AT::t_kkacc_1d_3_const f;
+  typename AT::t_kkfloat_1d rmass;
+  typename AT::t_kkfloat_1d mass;
+  typename AT::t_int_1d type;
+  typename AT::t_int_1d mask;
 };
 
 }
 
 #endif
 
-/* ERROR/WARNING messages:
-
-E: Cannot (yet) use rigid bodies with fix nh and Kokkos
-
-Self-explanatory.
-
-E: Fix npt/nph has tilted box too far in one step - periodic cell is too far from equilibrium state
-
-Self-explanatory.  The change in the box tilt is too extreme
-on a short timescale.
-
-*/

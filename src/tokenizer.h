@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -20,98 +20,116 @@
 
 #include "lmptype.h"
 
-#include <exception>  // IWYU pragma: export
-#include <string>     // IWYU pragma: export
-#include <vector>     // IWYU pragma: export
+#include <exception>
+#include <string>
+#include <vector>
 
 namespace LAMMPS_NS {
 
 #define TOKENIZER_DEFAULT_SEPARATORS " \t\r\n\f"
 
 class Tokenizer {
-    std::string text;
-    std::string separators;
-    size_t start;
-    size_t ntokens;
-public:
-    Tokenizer(const std::string &str, const std::string &separators = TOKENIZER_DEFAULT_SEPARATORS);
-    Tokenizer(Tokenizer &&);
-    Tokenizer(const Tokenizer &);
-    Tokenizer& operator=(const Tokenizer&);
-    Tokenizer& operator=(Tokenizer&&);
-    void swap(Tokenizer &);
+  std::string text;
+  std::string separators;
+  size_t start;
+  size_t ntokens;
 
-    void reset();
-    void skip(int n=1);
-    bool has_next() const;
-    bool contains(const std::string &str) const;
-    std::string next();
+ public:
+  Tokenizer(std::string str, std::string separators = TOKENIZER_DEFAULT_SEPARATORS);
+  Tokenizer(Tokenizer &&) noexcept;
+  Tokenizer(const Tokenizer &);
+  Tokenizer &operator=(const Tokenizer &);
+  Tokenizer &operator=(Tokenizer &&) noexcept;
+  void swap(Tokenizer &) noexcept;
 
-    size_t count();
-    std::vector<std::string> as_vector();
+  void reset();
+  void skip(int n = 1);
+  bool has_next() const;
+  bool contains(const std::string &str) const;
+  bool matches(const std::string &str) const;
+  std::string next();
+
+  size_t count();
+  std::vector<std::string> as_vector();
 };
+
+/** General Tokenizer exception class */
 
 class TokenizerException : public std::exception {
   std::string message;
-public:
+
+ public:
+  /** The default constructor is disabled */
+  TokenizerException() = delete;
+
   /** Thrown during retrieving or skipping tokens
    *
-   * \param  msg    String with error message
-   * \param  token  String of the token/word that caused the error */
-  TokenizerException(const std::string &msg, const std::string &token);
-
-  ~TokenizerException() throw() {
-  }
+   * \param   msg     String with error message
+   * \param   token   String of the token or word that caused the error */
+  explicit TokenizerException(const std::string &msg, const std::string &token);
 
   /** Retrieve message describing the thrown exception
-   * \return string with error message */
-  virtual const char * what() const throw() {
-    return message.c_str();
-  }
+   *
+   * This function provides the message that can be retrieved when the corresponding
+   * exception is caught.
+   *
+   * \return  String with error message */
+  const char *what() const noexcept override { return message.c_str(); }
 };
 
+/** Exception thrown by ValueTokenizer when trying to convert an invalid integer string */
+
 class InvalidIntegerException : public TokenizerException {
-public:
+
+ public:
   /** Thrown during converting string to integer number
    *
    * \param  token  String of the token/word that caused the error */
-  InvalidIntegerException(const std::string &token)
-    : TokenizerException("Not a valid integer number", token) {}
+  explicit InvalidIntegerException(const std::string &token) :
+      TokenizerException("Not a valid integer number", token)
+  {
+  }
 };
 
+/** Exception thrown by ValueTokenizer when trying to convert an floating point string */
+
 class InvalidFloatException : public TokenizerException {
-public:
+ public:
   /** Thrown during converting string to floating point number
    *
    * \param  token  String of the token/word that caused the error */
-  InvalidFloatException(const std::string &token)
-    : TokenizerException("Not a valid floating-point number", token) {}
+  explicit InvalidFloatException(const std::string &token) :
+      TokenizerException("Not a valid floating-point number", token)
+  {
+  }
 };
 
 class ValueTokenizer {
-    Tokenizer tokens;
-public:
-    ValueTokenizer(const std::string &str, const std::string &separators = TOKENIZER_DEFAULT_SEPARATORS);
-    ValueTokenizer(const ValueTokenizer &);
-    ValueTokenizer(ValueTokenizer &&);
-    ValueTokenizer& operator=(const ValueTokenizer&);
-    ValueTokenizer& operator=(ValueTokenizer&&);
-    void swap(ValueTokenizer &);
+  Tokenizer tokens;
 
-    std::string next_string();
-    tagint next_tagint();
-    bigint next_bigint();
-    int    next_int();
-    double next_double();
+ public:
+  ValueTokenizer(const std::string &str,
+                 const std::string &separators = TOKENIZER_DEFAULT_SEPARATORS);
+  ValueTokenizer(const ValueTokenizer &) = default;
+  ValueTokenizer(ValueTokenizer &&) noexcept;
+  ValueTokenizer &operator=(const ValueTokenizer &);
+  ValueTokenizer &operator=(ValueTokenizer &&) noexcept;
+  void swap(ValueTokenizer &) noexcept;
 
-    bool has_next() const;
-    bool contains(const std::string &value) const;
-    void skip(int ntokens=1);
+  std::string next_string();
+  tagint next_tagint();
+  bigint next_bigint();
+  int next_int();
+  double next_double();
 
-    size_t count();
+  bool has_next() const;
+  bool contains(const std::string &value) const;
+  bool matches(const std::string &str) const;
+  void skip(int ntokens = 1);
+
+  size_t count();
 };
 
-
-}
+}    // namespace LAMMPS_NS
 
 #endif

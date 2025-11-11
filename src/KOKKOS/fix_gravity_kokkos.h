@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-
-FixStyle(gravity/kk,FixGravityKokkos<LMPDeviceType>)
-FixStyle(gravity/kk/device,FixGravityKokkos<LMPDeviceType>)
-FixStyle(gravity/kk/host,FixGravityKokkos<LMPHostType>)
-
+// clang-format off
+FixStyle(gravity/kk,FixGravityKokkos<LMPDeviceType>);
+FixStyle(gravity/kk/device,FixGravityKokkos<LMPDeviceType>);
+FixStyle(gravity/kk/host,FixGravityKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_FIX_GRAVITY_KOKKOS_H
 #define LMP_FIX_GRAVITY_KOKKOS_H
 
@@ -33,9 +34,11 @@ struct TagFixGravityMass {};
 template<class DeviceType>
 class FixGravityKokkos : public FixGravity {
   public:
+    typedef ArrayTypes<DeviceType> AT;
+
     FixGravityKokkos(class LAMMPS *, int, char **);
-    virtual ~FixGravityKokkos() {}
-    void post_force(int);
+
+    void post_force(int) override;
 
     KOKKOS_INLINE_FUNCTION
     void operator()(TagFixGravityRMass, const int, double &) const;
@@ -43,12 +46,14 @@ class FixGravityKokkos : public FixGravity {
     void operator()(TagFixGravityMass, const int, double &) const;
 
   private:
-    typename ArrayTypes<DeviceType>::t_x_array x;
-    typename ArrayTypes<DeviceType>::t_f_array f;
-    typename ArrayTypes<DeviceType>::t_float_1d_randomread rmass;
-    typename ArrayTypes<DeviceType>::t_float_1d_randomread mass;
-    typename ArrayTypes<DeviceType>::t_int_1d type;
-    typename ArrayTypes<DeviceType>::t_int_1d mask;
+    typename AT::t_kkfloat_1d_3_lr x;
+    typename AT::t_kkacc_1d_3 f;
+    typename AT::t_kkfloat_1d_randomread rmass;
+    typename AT::t_kkfloat_1d_randomread mass;
+    typename AT::t_int_1d type;
+    typename AT::t_int_1d mask;
+
+    KK_FLOAT xacc_kk, yacc_kk, zacc_kk;
 };
 
 } // namespace LAMMPS_NS

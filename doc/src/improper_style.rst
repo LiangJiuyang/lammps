@@ -70,13 +70,13 @@ command.
 
 There are also additional accelerated pair styles included in the
 LAMMPS distribution for faster performance on CPUs, GPUs, and KNLs.
-The individual style names on the :ref:`Commands improper <improper>` doc page are followed by one or
+The individual style names on the :ref:`Commands improper <improper>` page are followed by one or
 more of (g,i,k,o,t) to indicate which accelerated styles exist.
 
 * :doc:`none <improper_none>` - turn off improper interactions
 * :doc:`zero <improper_zero>` - topology but no interactions
 * :doc:`hybrid <improper_hybrid>` - define multiple styles of improper interactions
-
+* :doc:`amoeba <improper_amoeba>` - AMOEBA out-of-plane improper
 * :doc:`class2 <improper_class2>` - COMPASS (class 2) improper
 * :doc:`cossq <improper_cossq>` - improper with a cosine squared term
 * :doc:`cvff <improper_cvff>` - CVFF improper
@@ -87,8 +87,7 @@ more of (g,i,k,o,t) to indicate which accelerated styles exist.
 * :doc:`inversion/harmonic <improper_inversion_harmonic>` - harmonic improper with Wilson-Decius out-of-plane definition
 * :doc:`ring <improper_ring>` - improper which prevents planar conformations
 * :doc:`umbrella <improper_umbrella>` - DREIDING improper
-
-:doc:`sqdistharm <improper_sqdistharm>` - improper that is harmonic in the square of the out-of-plane distance
+* :doc:`sqdistharm <improper_sqdistharm>` - improper that is harmonic in the square of the out-of-plane distance
 
 ----------
 
@@ -99,7 +98,7 @@ Improper styles can only be set for atom_style choices that allow
 impropers to be defined.
 
 Most improper styles are part of the MOLECULE package.  They are only
-enabled if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.  The doc pages for
+enabled if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.  The doc pages for
 individual improper potentials tell if it is part of a package.
 
 Related commands

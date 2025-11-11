@@ -11,12 +11,14 @@ LAMMPS in workshop settings, we had to redirect Windows users to
 Linux Virtual Machines such as VirtualBox or Unix-like compilation with
 Cygwin.
 
-With the latest updates in Windows 10 (Version 2004, Build 19041 or higher),
-Microsoft has added a new way to work on Linux-based code. The Windows
-Subsystem for Linux (WSL). With WSL Version 2, you now get a Linux Virtual
-Machine that transparently integrates into Windows. All you need is to ensure
-you have the latest Windows updates installed and enable this new feature.
-Linux VMs are then easily installed using the Microsoft Store.
+With the latest updates in Windows 10 (Version 2004, Build 19041 or
+higher), Microsoft has added a new way to work on Linux-based code. The
+`Windows Subsystem for Linux (WSL)
+<https://learn.microsoft.com/en-us/windows/wsl/>`_.  With WSL Version 2,
+you now get a Linux Virtual Machine that transparently integrates into
+Windows.  All you need is to ensure you have the latest Windows updates
+installed and enable this new feature.  Linux VMs are then easily
+installed using the Microsoft Store.
 
 In this tutorial, I'll show you how to set up and compile LAMMPS for both serial
 and MPI usage in WSL2.
@@ -201,14 +203,14 @@ build configuration and any binaries generated during compilation.
 
 There are countless ways to compile LAMMPS. It is beyond the scope of this
 tutorial. If you want to find out more about what can be enabled, please
-consult the extensive `documentation <https://lammps.sandia.gov/doc/Build_cmake.html>`_.
+consult the extensive `documentation <https://docs.lammps.org/Build_cmake.html>`_.
 
 To compile a minimal version of LAMMPS, we're going to use a preset.
 Presets are a way to specify a collection of CMake options using a file.
 
 .. code-block:: bash
 
-   cmake ../cmake/presets/minimal.cmake ../cmake
+   cmake ../cmake/presets/basic.cmake ../cmake
 
 This command configures the build and generates the necessary Makefiles. To compile the binary, run the make command.
 
@@ -258,7 +260,7 @@ Switch into the :code:`examples/melt` folder:
 
    cd ../examples/melt
 
-To run this example in serial, use the following command line:
+To run this example in serial, use the following command:
 
 .. code-block::
 
@@ -356,4 +358,4 @@ these skills will make you much more productive in this environment.
 
 .. seealso::
 
-   * `Windows Subsystem for Linux Documentation <https://docs.microsoft.com/en-us/windows/wsl/>`_
+   * `Windows Subsystem for Linux Documentation <https://learn.microsoft.com/en-us/windows/wsl/>`_

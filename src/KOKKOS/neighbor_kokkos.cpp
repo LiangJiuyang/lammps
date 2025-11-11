@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -17,16 +18,14 @@
 #include "atom_kokkos.h"
 #include "atom_masks.h"
 #include "bond.h"
-#include "comm.h"
+#include "domain.h"
 #include "dihedral.h"
 #include "error.h"
-#include "fix.h"
 #include "force.h"
 #include "improper.h"
 #include "kokkos.h"
 #include "memory_kokkos.h"
 #include "neigh_request.h"
-#include "pair.h"
 #include "style_nbin.h"
 #include "style_npair.h"
 #include "style_nstencil.h"
@@ -58,18 +57,11 @@ NeighborKokkos::~NeighborKokkos()
     memoryKK->destroy_kokkos(k_ex_type,ex_type);
     memoryKK->destroy_kokkos(k_ex1_type,ex1_type);
     memoryKK->destroy_kokkos(k_ex2_type,ex2_type);
-    memoryKK->destroy_kokkos(k_ex1_group,ex1_group);
-    memoryKK->destroy_kokkos(k_ex2_group,ex2_group);
     memoryKK->destroy_kokkos(k_ex_mol_group,ex_mol_group);
     memoryKK->destroy_kokkos(k_ex1_bit,ex1_bit);
     memoryKK->destroy_kokkos(k_ex2_bit,ex2_bit);
     memoryKK->destroy_kokkos(k_ex_mol_bit,ex_mol_bit);
     memoryKK->destroy_kokkos(k_ex_mol_intra,ex_mol_intra);
-
-    memoryKK->destroy_kokkos(k_bondlist,bondlist);
-    memoryKK->destroy_kokkos(k_anglelist,anglelist);
-    memoryKK->destroy_kokkos(k_dihedrallist,dihedrallist);
-    memoryKK->destroy_kokkos(k_improperlist,improperlist);
   }
 }
 
@@ -83,7 +75,7 @@ void NeighborKokkos::init()
   // 1st time allocation of xhold
 
   if (dist_check)
-      xhold = DAT::tdual_x_array("neigh:xhold",maxhold);
+      xhold = DAT::ttransform_kkfloat_1d_3_lr("neigh:xhold",maxhold);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -91,7 +83,7 @@ void NeighborKokkos::init()
 void NeighborKokkos::init_cutneighsq_kokkos(int n)
 {
   memoryKK->create_kokkos(k_cutneighsq,cutneighsq,n+1,n+1,"neigh:cutneighsq");
-  k_cutneighsq.modify<LMPHostType>();
+  k_cutneighsq.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -113,7 +105,7 @@ void NeighborKokkos::create_kokkos_list(int i)
 void NeighborKokkos::init_ex_type_kokkos(int n)
 {
   memoryKK->create_kokkos(k_ex_type,ex_type,n+1,n+1,"neigh:ex_type");
-  k_ex_type.modify<LMPHostType>();
+  k_ex_type.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -121,9 +113,9 @@ void NeighborKokkos::init_ex_type_kokkos(int n)
 void NeighborKokkos::init_ex_bit_kokkos()
 {
   memoryKK->create_kokkos(k_ex1_bit, ex1_bit, nex_group, "neigh:ex1_bit");
-  k_ex1_bit.modify<LMPHostType>();
+  k_ex1_bit.modify_host();
   memoryKK->create_kokkos(k_ex2_bit, ex2_bit, nex_group, "neigh:ex2_bit");
-  k_ex2_bit.modify<LMPHostType>();
+  k_ex2_bit.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -131,7 +123,7 @@ void NeighborKokkos::init_ex_bit_kokkos()
 void NeighborKokkos::init_ex_mol_bit_kokkos()
 {
   memoryKK->create_kokkos(k_ex_mol_bit, ex_mol_bit, nex_mol, "neigh:ex_mol_bit");
-  k_ex_mol_bit.modify<LMPHostType>();
+  k_ex_mol_bit.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -139,7 +131,7 @@ void NeighborKokkos::init_ex_mol_bit_kokkos()
 void NeighborKokkos::grow_ex_mol_intra_kokkos()
 {
   memoryKK->grow_kokkos(k_ex_mol_intra, ex_mol_intra, maxex_mol, "neigh:ex_mol_intra");
-  k_ex_mol_intra.modify<LMPHostType>();
+  k_ex_mol_intra.modify_host();
 }
 
 /* ----------------------------------------------------------------------
@@ -215,17 +207,17 @@ int NeighborKokkos::check_distance_kokkos()
 template<class DeviceType>
 KOKKOS_INLINE_FUNCTION
 void NeighborKokkos::operator()(TagNeighborCheckDistance<DeviceType>, const int &i, int &flag) const {
-  const X_FLOAT delx = x.view<DeviceType>()(i,0) - xhold.view<DeviceType>()(i,0);
-  const X_FLOAT dely = x.view<DeviceType>()(i,1) - xhold.view<DeviceType>()(i,1);
-  const X_FLOAT delz = x.view<DeviceType>()(i,2) - xhold.view<DeviceType>()(i,2);
-  const X_FLOAT rsq = delx*delx + dely*dely + delz*delz;
+  const double delx = x.view<DeviceType>()(i,0) - xhold.view<DeviceType>()(i,0);
+  const double dely = x.view<DeviceType>()(i,1) - xhold.view<DeviceType>()(i,1);
+  const double delz = x.view<DeviceType>()(i,2) - xhold.view<DeviceType>()(i,2);
+  const double rsq = delx*delx + dely*dely + delz*delz;
   if (rsq > deltasq) flag = 1;
 }
 
 /* ----------------------------------------------------------------------
    build perpetuals neighbor lists
    called at setup and every few timesteps during run or minimization
-   topology lists also built if topoflag = 1, USER-CUDA calls with topoflag = 0
+   topology lists also built if topoflag = 1, CUDA calls with topoflag = 0
 ------------------------------------------------------------------------- */
 
 
@@ -263,7 +255,7 @@ void NeighborKokkos::build_kokkos(int topoflag)
     int maxhold_kokkos = xhold.view<DeviceType>().extent(0);
     if (atom->nmax > maxhold || maxhold_kokkos < maxhold) {
       maxhold = atom->nmax;
-      xhold = DAT::tdual_x_array("neigh:xhold",maxhold);
+      xhold = DAT::ttransform_kkfloat_1d_3_lr("neigh:xhold",maxhold);
     }
     copymode = 1;
     Kokkos::parallel_for(Kokkos::RangePolicy<DeviceType, TagNeighborXhold<DeviceType> >(0,nlocal),*this);
@@ -309,7 +301,8 @@ void NeighborKokkos::build_kokkos(int topoflag)
   for (i = 0; i < npair_perpetual; i++) {
     m = plist[i];
     if (!lists[m]->kokkos) atomKK->sync(Host,ALL_MASK);
-    if (!lists[m]->copy) lists[m]->grow(nlocal,nall);
+    if (!lists[m]->copy || lists[m]->trim || lists[m]->kk2cpu)
+      lists[m]->grow(nlocal,nall);
     neigh_pair[m]->build_setup();
     neigh_pair[m]->build(lists[m]);
   }
@@ -331,29 +324,21 @@ void NeighborKokkos::operator()(TagNeighborXhold<DeviceType>, const int &i) cons
 
 void NeighborKokkos::modify_ex_type_grow_kokkos() {
   memoryKK->grow_kokkos(k_ex1_type,ex1_type,maxex_type,"neigh:ex1_type");
-  k_ex1_type.modify<LMPHostType>();
+  k_ex1_type.modify_host();
   memoryKK->grow_kokkos(k_ex2_type,ex2_type,maxex_type,"neigh:ex2_type");
-  k_ex2_type.modify<LMPHostType>();
-}
-
-/* ---------------------------------------------------------------------- */
-void NeighborKokkos::modify_ex_group_grow_kokkos() {
-  memoryKK->grow_kokkos(k_ex1_group,ex1_group,maxex_group,"neigh:ex1_group");
-  k_ex1_group.modify<LMPHostType>();
-  memoryKK->grow_kokkos(k_ex2_group,ex2_group,maxex_group,"neigh:ex2_group");
-  k_ex2_group.modify<LMPHostType>();
+  k_ex2_type.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
 void NeighborKokkos::modify_mol_group_grow_kokkos() {
   memoryKK->grow_kokkos(k_ex_mol_group,ex_mol_group,maxex_mol,"neigh:ex_mol_group");
-  k_ex_mol_group.modify<LMPHostType>();
+  k_ex_mol_group.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
 void NeighborKokkos::modify_mol_intra_grow_kokkos() {
   memoryKK->grow_kokkos(k_ex_mol_intra,ex_mol_intra,maxex_mol,"neigh:ex_mol_intra");
-  k_ex_mol_intra.modify<LMPHostType>();
+  k_ex_mol_intra.modify_host();
 }
 
 /* ---------------------------------------------------------------------- */
@@ -376,7 +361,7 @@ void NeighborKokkos::init_topology() {
 
 /* ----------------------------------------------------------------------
    build all topology neighbor lists every few timesteps
-   normally built with pair lists, but USER-CUDA separates them
+   normally built with pair lists, but CUDA separates them
 ------------------------------------------------------------------------- */
 
 void NeighborKokkos::build_topology() {
@@ -391,13 +376,13 @@ void NeighborKokkos::build_topology() {
     // Transfer topology neighbor lists to Host for non-Kokkos styles
 
     if (force->bond && force->bond->execution_space == Host)
-      k_bondlist.sync<LMPHostType>();
+      k_bondlist.sync_host();
     if (force->angle && force->angle->execution_space == Host)
-      k_anglelist.sync<LMPHostType>();
+      k_anglelist.sync_host();
     if (force->dihedral && force->dihedral->execution_space == Host)
-      k_dihedrallist.sync<LMPHostType>();
+      k_dihedrallist.sync_host();
     if (force->improper && force->improper->execution_space == Host)
-      k_improperlist.sync<LMPHostType>();
+      k_improperlist.sync_host();
 
    } else {
     neighbond_host.build_topology_kk();

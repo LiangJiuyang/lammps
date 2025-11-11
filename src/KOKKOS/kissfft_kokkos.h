@@ -1,7 +1,8 @@
+// clang-format off
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -137,6 +138,7 @@ namespace LAMMPS_NS {
 template<class DeviceType>
 struct kiss_fft_state_kokkos {
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
   typedef FFTArrayTypes<DeviceType> FFT_AT;
   int nfft;
   int inverse;
@@ -149,6 +151,7 @@ template<class DeviceType>
 class KissFFTKokkos {
  public:
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
   typedef FFTArrayTypes<DeviceType> FFT_AT;
 
   KOKKOS_INLINE_FUNCTION
@@ -488,7 +491,7 @@ class KissFFTKokkos {
    * It can be freed with free(), rather than a kiss_fft-specific function.
    */
 
-  static kiss_fft_state_kokkos<DeviceType> kiss_fft_alloc_kokkos(int nfft, int inverse_fft, void *mem, size_t *lenmem)
+  static kiss_fft_state_kokkos<DeviceType> kiss_fft_alloc_kokkos(int nfft, int inverse_fft, void * /*mem*/, size_t * /*lenmem*/)
   {
       kiss_fft_state_kokkos<DeviceType> st;
       int i;
@@ -504,19 +507,19 @@ class KissFFTKokkos {
 
           for (i=0;i<nfft;++i) {
               const double phase = (st.inverse ? 2.0*M_PI:-2.0*M_PI)*i / nfft;
-              kf_cexp(k_twiddles.h_view,i,phase );
+              kf_cexp(k_twiddles.view_host(),i,phase );
           }
 
-          int p_max = kf_factor(nfft,k_factors.h_view);
+          int p_max = kf_factor(nfft,k_factors.view_host());
           st.d_scratch = typename FFT_AT::t_FFT_DATA_1d("kissfft:scratch",p_max);
       }
 
-      k_factors.template modify<LMPHostType>();
-      k_factors.template sync<LMPDeviceType>();
+      k_factors.modify_host();
+      k_factors.sync_device();
       st.d_factors = k_factors.template view<DeviceType>();
 
-      k_twiddles.template modify<LMPHostType>();
-      k_twiddles.template sync<LMPDeviceType>();
+      k_twiddles.modify_host();
+      k_twiddles.sync_device();
       st.d_twiddles = k_twiddles.template view<DeviceType>();
 
       return st;

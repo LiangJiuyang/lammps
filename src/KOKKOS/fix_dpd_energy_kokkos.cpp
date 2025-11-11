@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -47,14 +48,14 @@ void FixDPDenergyKokkos<DeviceType>::take_half_step()
   using AT = ArrayTypes<DeviceType>;
 
   atomKK->sync(execution_space, UCOND_MASK);
-  typename AT::t_efloat_1d uCond = atomKK->k_uCond.view<DeviceType>();
+  typename AT::t_kkfloat_1d uCond = atomKK->k_uCond.view<DeviceType>();
   atomKK->sync(execution_space, UMECH_MASK);
-  typename AT::t_efloat_1d uMech = atomKK->k_uMech.view<DeviceType>();
+  typename AT::t_kkfloat_1d uMech = atomKK->k_uMech.view<DeviceType>();
 
   pairDPDEKK->k_duCond.template sync<DeviceType>();
-  typename AT::t_efloat_1d_const duCond = pairDPDEKK->k_duCond.template view<DeviceType>();
+  typename AT::t_kkfloat_1d_const duCond = pairDPDEKK->k_duCond.template view<DeviceType>();
   pairDPDEKK->k_duMech.template sync<DeviceType>();
-  typename AT::t_efloat_1d_const duMech = pairDPDEKK->k_duMech.template view<DeviceType>();
+  typename AT::t_kkfloat_1d_const duMech = pairDPDEKK->k_duMech.template view<DeviceType>();
 
   auto dt = update->dt;
 

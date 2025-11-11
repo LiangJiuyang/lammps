@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,9 +12,9 @@
 ------------------------------------------------------------------------- */
 
 #ifdef ATOM_CLASS
-
-AtomStyle(dipole,AtomVecDipole)
-
+// clang-format off
+AtomStyle(dipole,AtomVecDipole);
+// clang-format on
 #else
 
 #ifndef LMP_ATOM_VEC_DIPOLE_H
@@ -24,22 +24,22 @@ AtomStyle(dipole,AtomVecDipole)
 
 namespace LAMMPS_NS {
 
-class AtomVecDipole : public AtomVec {
+class AtomVecDipole : virtual public AtomVec {
  public:
   AtomVecDipole(class LAMMPS *);
 
-  void grow_pointers();
-  void data_atom_post(int);
+  void grow_pointers() override;
+  void data_atom_post(int) override;
+  void read_data_general_to_restricted(int, int) override;
+  void write_data_restricted_to_general() override;
+  void write_data_restore_restricted() override;
 
- private:
+ protected:
   double **mu;
+  double **mu_hold;
 };
 
-}
+}    // namespace LAMMPS_NS
 
 #endif
 #endif
-
-/* ERROR/WARNING messages:
-
-*/

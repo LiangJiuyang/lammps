@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -10,6 +10,7 @@
 
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
+// clang-format off
 
 // Pointers class contains ptrs to master copy of
 //   fundamental LAMMPS class ptrs stored in lammps.h
@@ -22,13 +23,17 @@
 #define LMP_POINTERS_H
 
 #include "lmptype.h"    // IWYU pragma: export
+
 #include <mpi.h>        // IWYU pragma: export
 #include <cstddef>      // IWYU pragme: export
 #include <cstdio>       // IWYU pragma: export
 #include <string>       // IWYU pragma: export
-#include "lammps.h"     // IWYU pragma: export
-#include "utils.h"      // IWYU pragma: export
+#include <vector>       // IWYU pragma: export
+
 #include "fmt/format.h" // IWYU pragma: export
+#include "lammps.h"     // IWYU pragma: export
+#include "platform.h"   // IWYU pragma: export
+#include "utils.h"      // IWYU pragma: export
 
 namespace LAMMPS_NS {
 
@@ -41,7 +46,7 @@ namespace LAMMPS_NS {
 
 // enum used for KOKKOS host/device flags
 
-enum ExecutionSpace{Host,Device};
+enum ExecutionSpace{ Host, HostKK, Device };
 
 // global forward declarations
 
@@ -87,7 +92,18 @@ class Pointers {
     atomKK(ptr->atomKK),
     memoryKK(ptr->memoryKK),
     python(ptr->python) {}
-  virtual ~Pointers() {}
+  // clang-format off
+  // cannot use = default here due to broken GCC on RHEL 8
+  virtual ~Pointers() noexcept(false) {}  // NOLINT
+  // clang-format on
+
+  // remove other default members where possible
+
+  Pointers() = delete;
+  Pointers(const Pointers &) = default;
+  Pointers(Pointers &&) = delete;
+  Pointers & operator=(const Pointers&) = delete;
+  Pointers & operator=(Pointers&&) = delete;
 
  protected:
   LAMMPS *lmp;

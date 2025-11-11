@@ -1,9 +1,6 @@
-# Make.sh = update Makefile.lib, Makefile.shlib, Makefile.list
-#           or style_*.h files
+# Make.sh = update style_*.h and packages_*.h files
 # Syntax: sh Make.sh style
-#         sh Make.sh Makefile.lib
-#         sh Make.sh Makefile.shlib
-#         sh Make.sh Makefile.list
+#         sh Make.sh packages
 
 # turn off enforced customizations
 GREP_OPTIONS=
@@ -12,8 +9,6 @@ LC_ALL=C
 export LC_ALL GREP_OPTIONS
 
 # function to create one style_*.h file
-# must whack *.d files that depend on style_*.h file,
-# else Make will not recreate them
 
 style () {
   list=`grep -sl $1 $2*.h`
@@ -30,30 +25,17 @@ style () {
     elif (test "`cat style_$3.h`" != "") then
       rm -f style_$3.h
       touch style_$3.h
-      rm -f Obj_*/$4.d
-      if (test $5) then
-        rm -f Obj_*/$5.d
-      fi
-      rm -f Obj_*/lammps.d
     fi
   elif (test ! -e style_$3.h) then
     mv style_$3.tmp style_$3.h
-    rm -f Obj_*/$4.d
-    if (test $5) then
-      rm -f Obj_*/$5.d
-    fi
-    rm -f Obj_*/lammps.d
   elif (test "`diff --brief style_$3.h style_$3.tmp`" != "") then
     mv style_$3.tmp style_$3.h
-    rm -f Obj_*/$4.d
-    if (test $5) then
-      rm -f Obj_*/$5.d
-    fi
-    rm -f Obj_*/lammps.d
   else
     rm -f style_$3.tmp
   fi
 }
+
+# function to create one packages_*.h file
 
 packages () {
   list=`grep -sl $1 */$2*.h`
@@ -95,58 +77,26 @@ cmd=$1
 
 if (test $cmd = "style") || (test $cmd = "packages") then
 
-  $cmd ANGLE_CLASS     angle_      angle      force
-  $cmd ATOM_CLASS      atom_vec_   atom       atom      atom_vec_hybrid
-  $cmd BODY_CLASS      body_       body       atom_vec_body
-  $cmd BOND_CLASS      bond_       bond       force
-  $cmd COMMAND_CLASS   ""          command    input
-  $cmd COMPUTE_CLASS   compute_    compute    modify
-  $cmd DIHEDRAL_CLASS  dihedral_   dihedral   force
-  $cmd DUMP_CLASS      dump_       dump       output    write_dump
-  $cmd FIX_CLASS       fix_        fix        modify
-  $cmd IMPROPER_CLASS  improper_   improper   force
-  $cmd INTEGRATE_CLASS ""          integrate  update
-  $cmd KSPACE_CLASS    ""          kspace     force
-  $cmd MINIMIZE_CLASS  min_        minimize   update
-  $cmd NBIN_CLASS      nbin_       nbin       neighbor
-  $cmd NPAIR_CLASS     npair_      npair      neighbor
-  $cmd NSTENCIL_CLASS  nstencil_   nstencil   neighbor
-  $cmd NTOPO_CLASS     ntopo_      ntopo      neighbor
-  $cmd PAIR_CLASS      pair_       pair       force
-  $cmd READER_CLASS    reader_     reader     read_dump
-  $cmd REGION_CLASS    region_     region     domain
-
-# edit Makefile.lib, for creating non-shared lib
-# called by "make makelib"
-# use current list of *.cpp and *.h files in src dir w/out main.cpp
-
-elif (test $1 = "Makefile.lib") then
-
-  list=`ls -1 *.cpp | sed s/^main\.cpp// | tr "[:cntrl:]" " "`
-  sed -i -e "s/SRC =	.*/SRC =	$list/" Makefile.lib
-  list=`ls -1 *.h | tr "[:cntrl:]" " "`
-  sed -i -e "s/INC =	.*/INC =	$list/" Makefile.lib
-
-# edit Makefile.shlib, for creating shared lib
-# called by "make makeshlib"
-# use current list of *.cpp and *.h files in src dir w/out main.cpp
-
-elif (test $1 = "Makefile.shlib") then
-
-  list=`ls -1 *.cpp | sed s/^main\.cpp// | tr "[:cntrl:]" " "`
-  sed -i -e "s/SRC =	.*/SRC =	$list/" Makefile.shlib
-  list=`ls -1 *.h | tr "[:cntrl:]" " "`
-  sed -i -e "s/INC =	.*/INC =	$list/" Makefile.shlib
-
-# edit Makefile.list
-# called by "make makelist"
-# use current list of *.cpp and *.h files in src dir
-
-elif (test $1 = "Makefile.list") then
-
-  list=`ls -1 *.cpp | tr "[:cntrl:]" " "`
-  sed -i -e "s/SRC =	.*/SRC =	$list/" Makefile.list
-  list=`ls -1 *.h | tr "[:cntrl:]" " "`
-  sed -i -e "s/INC =	.*/INC =	$list/" Makefile.list
+  $cmd ANGLE_CLASS        angle_         angle         force
+  $cmd ATOM_CLASS         atom_vec_      atom          atom      atom_vec_hybrid
+  $cmd BODY_CLASS         body_          body          atom_vec_body
+  $cmd BOND_CLASS         bond_          bond          force
+  $cmd COMMAND_CLASS      ""             command       input
+  $cmd COMPUTE_CLASS      compute_       compute       modify
+  $cmd DIHEDRAL_CLASS     dihedral_      dihedral      force
+  $cmd DUMP_CLASS         dump_          dump          output    write_dump
+  $cmd FIX_CLASS          fix_           fix           modify
+  $cmd GRAN_SUB_MOD_CLASS gran_sub_mod_  gran_sub_mod  granular_model
+  $cmd IMPROPER_CLASS     improper_      improper      force
+  $cmd INTEGRATE_CLASS    ""             integrate     update
+  $cmd KSPACE_CLASS       ""             kspace        force
+  $cmd MINIMIZE_CLASS     min_           minimize      update
+  $cmd NBIN_CLASS         nbin_          nbin          neighbor
+  $cmd NPAIR_CLASS        npair_         npair         neighbor
+  $cmd NSTENCIL_CLASS     nstencil_      nstencil      neighbor
+  $cmd NTOPO_CLASS        ntopo_         ntopo         neighbor
+  $cmd PAIR_CLASS         pair_          pair          force
+  $cmd READER_CLASS       reader_        reader        read_dump
+  $cmd REGION_CLASS       region_        region        domain
 
 fi

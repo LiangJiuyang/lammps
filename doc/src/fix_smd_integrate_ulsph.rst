@@ -36,7 +36,7 @@ Description
 The fix performs explicit time integration for particles which
 interact with the updated Lagrangian SPH pair style.
 
-See `this PDF guide <PDF/SMD_LAMMPS_userguide.pdf>`_ to using Smooth Mach
+See `this PDF guide <PDF/MACHDYN_LAMMPS_userguide.pdf>`_ to using Smooth Mach
 Dynamics in LAMMPS.
 
 The *adjust_radius* keyword activates dynamic adjustment of the
@@ -52,14 +52,19 @@ the velocity vector to max_vel in case it exceeds this velocity limit.
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-Currently, no part of USER-SMD supports restarting nor
+Currently, no part of MACHDYN supports restarting nor
 minimization. This fix has no outputs.
 
 Restrictions
 """"""""""""
 
-This fix is part of the USER-SMD package.  It is only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+This fix is part of the MACHDYN package.  It is only enabled if
+LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
+
+.. versionchanged:: 29Aug2024
+
+This fix is incompatible with deformation controls that remap velocity,
+for instance the *remap v* option of :doc:`fix deform <fix_deform>`.
 
 Related commands
 """"""""""""""""

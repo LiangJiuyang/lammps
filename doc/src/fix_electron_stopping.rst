@@ -1,8 +1,11 @@
 .. index:: fix electron/stopping
+.. index:: fix electron/stopping/kk
 .. index:: fix electron/stopping/fit
 
 fix electron/stopping command
 =============================
+
+Accelerator Variants: *electron/stopping/kk*
 
 fix electron/stopping/fit command
 =================================
@@ -10,7 +13,7 @@ fix electron/stopping/fit command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID style args
 
@@ -92,7 +95,7 @@ its velocity and :math:`S_e` is the stopping power of the ion.
    atomic subsystems with the two-temperature model (:doc:`fix_ttm <fix_ttm>`).
 
 At low velocities the electronic stopping is negligible. The electronic
-friction is not applied to atoms whose kinetic energy is smaller than *Ecut*\ ,
+friction is not applied to atoms whose kinetic energy is smaller than *Ecut*,
 or smaller than the lowest energy value given in the table in *file*\ .
 Electronic stopping should be applied only when a projectile reaches bulk
 material. This fix scans neighbor list and excludes atoms with fewer than
@@ -133,16 +136,15 @@ For example:
    750      100      150
 
 If an atom which would have electronic stopping applied to it has a
-kinetic energy higher than the largest energy given in *file*\ , LAMMPS
+kinetic energy higher than the largest energy given in *file*, LAMMPS
 will exit with an error message.
 
 The stopping power depends on the energy of the ion and the target
-material. The electronic stopping table can be obtained from
-scientific publications, experimental databases or by using
-:ref:`SRIM <SRIM>` software. Other programs such as :ref:`CasP <CasP>` or
-:ref:`PASS <PASS>` can calculate the energy deposited as a function
-of the impact parameter of the ion; these results can be used
-to derive the stopping power.
+material. The electronic stopping table can be obtained from scientific
+publications, experimental databases or by using :ref:`SRIM <SRIM>`
+software. Other programs such as :ref:`CasP <CasP>` can calculate the
+energy deposited as a function of the impact parameter of the ion; these
+results can be used to derive the stopping power.
 
 ----------
 
@@ -153,9 +155,21 @@ atoms moving above some minimum cutoff velocity (i.e., kinetic energy).
 These coefficients can be determined by fitting a quadratic polynomial to
 electronic stopping data predicted by, for example, SRIM or TD-DFT. Multiple
 'Ecut c1 c2' values can be provided for multi-species simulations in the order
-of the atom types. There is an examples/USER/misc/electron_stopping/ directory,
+of the atom types. There is an examples/PACKAGES/electron_stopping/ directory,
 which illustrates uses of this command. Details of this implementation are
 further described in :ref:`Stewart2018 <Stewart2018>` and :ref:`Lee2020 <Lee2020>`.
+
+----------
+
+.. include:: accel_styles.rst
+
+.. note::
+
+  The region keyword is supported by Kokkos, but a Kokkos-enabled
+  region must be used. See the region :doc:`region <region>` command for
+  more information.
+
+----------
 
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -175,7 +189,7 @@ on this fix.
 Restrictions
 """"""""""""
 
-This pair style is part of the USER-MISC package. It is only enabled if
+This pair style is part of the EXTRA-FIX package. It is only enabled if
 LAMMPS was built with that package. See the :doc:`Build package <Build_package>`
 doc page for more info.
 
@@ -204,11 +218,7 @@ The default is no limitation by region, and minneigh = 1.
 
 .. _CasP:
 
-**(CasP)** CasP webpage: https://www.helmholtz-berlin.de/people/gregor-schiwietz/casp_en.html
-
-.. _PASS:
-
-**(PASS)** PASS webpage: https://www.sdu.dk/en/DPASS
+**(CasP)** CasP webpage: http://www.casp-program.org/
 
 .. _Stewart2018:
 

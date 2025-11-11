@@ -1,7 +1,10 @@
 .. index:: dihedral_style hybrid
+.. index:: dihedral_style hybrid/kk
 
 dihedral_style hybrid command
 =============================
+
+Accelerator Variants: *hybrid/kk*
 
 Syntax
 """"""
@@ -57,8 +60,8 @@ If *class2* is one of the dihedral hybrid styles, the same rule holds
 for specifying additional AngleTorsion (and EndBondTorsion, etc)
 coefficients either via the input script or in the data file.
 I.e. *class2* must be added to each line after the dihedral type.  For
-lines in the AngleTorsion (or EndBondTorsion, etc) section of the data
-file for dihedral types that are not *class2*\ , you must use an
+lines in the AngleTorsion (or EndBondTorsion, etc) Coeffs section of the data
+file for dihedral types that are not *class2*, you must use an
 dihedral style of *skip* as a placeholder, e.g.
 
 .. parsed-literal::
@@ -80,6 +83,10 @@ for specific dihedral types.
 
 ----------
 
+.. include:: accel_styles.rst
+
+----------
+
 Restrictions
 """"""""""""
 
@@ -88,8 +95,10 @@ MOLECULE package.  See the :doc:`Build package <Build_package>` doc page
 for more info.
 
 Unlike other dihedral styles, the hybrid dihedral style does not store
-dihedral coefficient info for individual sub-styles in a :doc:`binary restart files <restart>`.  Thus when restarting a simulation from a
-restart file, you need to re-specify dihedral_coeff commands.
+dihedral coefficient info for individual sub-styles in :doc:`binary
+restart files <restart>` or :doc:`data files <write_data>`.  Thus when
+restarting a simulation, you need to re-specify the dihedral_coeff
+commands.
 
 Related commands
 """"""""""""""""

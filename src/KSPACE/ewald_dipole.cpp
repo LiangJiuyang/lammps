@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -35,7 +36,7 @@ using namespace LAMMPS_NS;
 using namespace MathConst;
 using namespace MathSpecial;
 
-#define SMALL 0.00001
+static constexpr double SMALL = 0.00001;
 
 /* ---------------------------------------------------------------------- */
 
@@ -71,7 +72,7 @@ void EwaldDipole::init()
   dipoleflag = atom->mu?1:0;
   qsum_qsq(0); // q[i] might not be declared ?
 
-  if (dipoleflag && q2)
+  if (dipoleflag && (q2 != 0.0))
     error->all(FLERR,"Cannot (yet) use charges with Kspace style EwaldDipole");
 
   // no triclinic ewald dipole (yet)
@@ -111,7 +112,7 @@ void EwaldDipole::init()
   pair_check();
 
   int itmp;
-  double *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
+  auto *p_cutoff = (double *) force->pair->extract("cut_coul",itmp);
   if (p_cutoff == nullptr)
     error->all(FLERR,"KSpace style is incompatible with Pair style");
   double cutoff = *p_cutoff;

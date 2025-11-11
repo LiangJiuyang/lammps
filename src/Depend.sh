@@ -11,7 +11,7 @@ export LC_ALL
 
 # update child packages that depend on the parent,
 #   but only if the child package is already installed
-# this is necessary to insure the child package installs
+# this is necessary to ensure the child package installs
 #   only child files whose parent package files are now installed
 # decisions on (un)installing individual child files are made by
 #   the Install.sh script in the child package
@@ -46,106 +46,177 @@ depend () {
 # add one depend() call per child package that depends on that parent
 
 if (test $1 = "ASPHERE") then
-  depend GPU
-  depend USER-OMP
-  depend USER-CGDNA
-  depend USER-INTEL
+  depend OPENMP
+  depend CG-DNA
+  depend INTEL
 fi
 
 if (test $1 = "CLASS2") then
-  depend GPU
   depend KOKKOS
-  depend USER-OMP
+  depend OPENMP
 fi
 
 if (test $1 = "COLLOID") then
-  depend GPU
-  depend USER-OMP
+  depend KOKKOS
+  depend OPENMP
+fi
+
+if (test $1 = "COLVARS") then
+  depend KOKKOS
+fi
+
+if (test $1 = "DIELECTRIC") then
+  depend OPENMP
 fi
 
 if (test $1 = "DIPOLE") then
-  depend USER-MISC
-  depend USER-OMP
+  depend KOKKOS
+  depend OPENMP
+fi
+
+if (test $1 = "DPD-BASIC") then
+  depend KOKKOS
+  depend OPENMP
+  depend INTEL
+fi
+
+if (test $1 = "ELECTRODE") then
+  depend INTEL
+fi
+
+if (test $1 = "EXTRA-COMPUTE") then
+  depend KOKKOS
+fi
+
+if (test $1 = "EXTRA-FIX") then
+  depend KOKKOS
+fi
+
+if (test $1 = "EXTRA-MOLECULE") then
+  depend OPENMP
+fi
+
+if (test $1 = "EXTRA-PAIR") then
+  depend KOKKOS
+  depend OPENMP
 fi
 
 if (test $1 = "GRANULAR") then
   depend KOKKOS
-  depend USER-OMP
+  depend OPENMP
+fi
+
+if (test $1 = "INTERLAYER") then
+  depend OPT
 fi
 
 if (test $1 = "KSPACE") then
+  depend CG-SPICA
   depend CORESHELL
-  depend GPU
+  depend DIELECTRIC
+  depend DPD-BASIC
   depend KOKKOS
   depend OPT
-  depend USER-OMP
-  depend USER-INTEL
-  depend USER-PHONON
-  depend USER-FEP
+  depend OPENMP
+  depend INTEL
+  depend PHONON
+  depend FEP
+fi
+
+if (test $1 = "LEPTON") then
+  depend OPENMP
 fi
 
 if (test $1 = "MANYBODY") then
-  depend GPU
+  depend INTEL
   depend KOKKOS
   depend OPT
   depend QEQ
-  depend USER-MISC
-  depend USER-OMP
+  depend OPENMP
+fi
+
+if (test $1 = "MC") then
+  depend MISC
+  depend VORONOI
+fi
+
+if (test $1 = "MEAM") then
+  depend KOKKOS
 fi
 
 if (test $1 = "MOLECULE") then
-  depend GPU
+  depend EXTRA-MOLECULE
   depend KOKKOS
-  depend USER-MISC
-  depend USER-FEP
-  depend USER-OMP
-  depend USER-INTEL
+  depend FEP
+  depend MESONT
+  depend OPENMP
+  depend INTEL
 fi
 
 if (test $1 = "PERI") then
-  depend USER-OMP
+  depend OPENMP
 fi
 
 if (test $1 = "PYTHON") then
-  depend MLIAP
+  depend ML-IAP
+  depend KOKKOS
+fi
+
+if (test $1 = "PHONON") then
+  depend KOKKOS
 fi
 
 if (test $1 = "RIGID") then
+  depend MC
   depend KOKKOS
-  depend USER-OMP
-  depend USER-SDPD
+  depend OPENMP
+  depend DPD-SMOOTH
 fi
 
-if (test $1 = "SNAP") then
-  depend KOKKOS
-  depend MLIAP
-fi
-
-if (test $1 = "USER-CGSDK") then
-  depend GPU
-  depend KOKKOS
-  depend USER-OMP
-fi
-
-if (test $1 = "USER-DPD") then
+if (test $1 = "ML-IAP") then
   depend KOKKOS
 fi
 
-if (test $1 = "USER-DRUDE") then
-  depend USER-OMP
-fi
-
-if (test $1 = "USER-FEP") then
-  depend USER-OMP
-fi
-
-if (test $1 = "USER-MISC") then
-  depend GPU
-  depend USER-OMP
-  depend USER-INTEL
-fi
-
-if (test $1 = "USER-REAXC") then
+if (test $1 = "ML-PACE") then
   depend KOKKOS
-  depend USER-OMP
+fi
+
+if (test $1 = "ML-POD") then
+  depend KOKKOS
+fi
+
+if (test $1 = "ML-SNAP") then
+  depend ML-IAP
+  depend KOKKOS
+  depend INTEL
+fi
+
+if (test $1 = "ML-UF3") then
+  depend KOKKOS
+fi
+
+if (test $1 = "CG-SPICA") then
+  depend KOKKOS
+  depend OPENMP
+fi
+
+if (test $1 = "DPD-REACT") then
+  depend KOKKOS
+fi
+
+if (test $1 = "DRUDE") then
+  depend OPENMP
+fi
+
+if (test $1 = "FEP") then
+  depend OPENMP
+fi
+
+if (test $1 = "REAXFF") then
+  depend KOKKOS
+  depend OPENMP
+fi
+
+if (test $1 = "SPIN") then
+  depend KOKKOS
 fi

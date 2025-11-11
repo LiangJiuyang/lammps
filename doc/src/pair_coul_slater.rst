@@ -1,6 +1,7 @@
 .. index:: pair_style coul/slater
 .. index:: pair_style coul/slater/cut
 .. index:: pair_style coul/slater/long
+.. index:: pair_style coul/slater/long/gpu
 
 pair_style coul/slater command
 ==============================
@@ -10,6 +11,8 @@ pair_style coul/slater/cut command
 
 pair_style coul/slater/long command
 ===================================
+
+Accelerator Variants: *coul/slater/long/gpu*
 
 Syntax
 """"""
@@ -40,7 +43,7 @@ Examples
 Description
 """""""""""
 
-Styles *coul/slater* compute electrostatic interactions in mesoscopic models
+Styles *coul/slater/** compute electrostatic interactions in mesoscopic models
 which employ potentials without explicit excluded-volume interactions.
 The goal is to prevent artificial ionic pair formation by including a charge
 distribution in the Coulomb potential, following the formulation of
@@ -74,6 +77,10 @@ The global decay length of the charge (:math:`\lambda`) specified in the pair_st
 
 ----------
 
+.. include:: accel_styles.rst
+
+----------
+
 Mixing, shift, table, tail correction, restart, rRESPA info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -93,15 +100,15 @@ to be specified in an input script that reads a restart file.
 
 This pair style can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  It does not support the
-*inner*\ , *middle*\ , *outer* keywords.
+*inner*, *middle*, *outer* keywords.
 
 Restrictions
 """"""""""""
 
 The  *coul/slater/long* style requires the long-range solvers included in the KSPACE package.
 
-These styles are part of the USER-MISC package.  They are only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+These styles are part of the EXTRA-PAIR package.  They are only enabled if
+LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

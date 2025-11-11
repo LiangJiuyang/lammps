@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -17,29 +18,29 @@
 
 #include "improper_class2.h"
 
-#include <cmath>
-#include <cstring>
 #include "atom.h"
-#include "neighbor.h"
-#include "update.h"
 #include "comm.h"
+#include "error.h"
 #include "force.h"
 #include "math_const.h"
 #include "memory.h"
-#include "error.h"
+#include "neighbor.h"
 
-
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 using namespace MathConst;
-
-#define SMALL 0.001
 
 /* ---------------------------------------------------------------------- */
 
 ImproperClass2::ImproperClass2(LAMMPS *lmp) : Improper(lmp)
 {
   writedata = 1;
+
+  // the second atom in the quadruplet is the atom of symmetry
+
+  symmatoms[1] = 1;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -153,19 +154,8 @@ void ImproperClass2::compute(int eflag, int vflag)
     // angle error check
 
     for (i = 0; i < 3; i++) {
-      if (costheta[i] == -1.0) {
-        int me = comm->me;
-        if (screen) {
-          error->warning(FLERR,fmt::format("Improper problem: {} {} {} {} {} {}",
-                                           me,update->ntimestep,
-                                           atom->tag[i1],atom->tag[i2],
-                                           atom->tag[i3],atom->tag[i4]));
-          fmt::print(screen,"  1st atom: {} {} {} {}\n",me,x[i1][0],x[i1][1],x[i1][2]);
-          fmt::print(screen,"  2nd atom: {} {} {} {}\n",me,x[i2][0],x[i2][1],x[i2][2]);
-          fmt::print(screen,"  3rd atom: {} {} {} {}\n",me,x[i3][0],x[i3][1],x[i3][2]);
-          fmt::print(screen,"  4th atom: {} {} {} {}\n",me,x[i4][0],x[i4][1],x[i4][2]);
-        }
-      }
+      if (costheta[i] == -1.0)
+        problem(FLERR, i1, i2, i3, i4);
     }
 
     for (i = 0; i < 3; i++) {
@@ -519,7 +509,7 @@ void ImproperClass2::allocate()
 
 void ImproperClass2::coeff(int narg, char **arg)
 {
-  if (narg < 2) error->all(FLERR,"Incorrect args for improper coefficients");
+  if (narg < 2) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -528,7 +518,7 @@ void ImproperClass2::coeff(int narg, char **arg)
   int count = 0;
 
   if (strcmp(arg[1],"aa") == 0) {
-    if (narg != 8) error->all(FLERR,"Incorrect args for improper coefficients");
+    if (narg != 8) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
 
     double k1_one = utils::numeric(FLERR,arg[2],false,lmp);
     double k2_one = utils::numeric(FLERR,arg[3],false,lmp);
@@ -551,7 +541,7 @@ void ImproperClass2::coeff(int narg, char **arg)
     }
 
   } else {
-    if (narg != 3) error->all(FLERR,"Incorrect args for improper coefficients");
+    if (narg != 3) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
 
     double k0_one = utils::numeric(FLERR,arg[1],false,lmp);
     double chi0_one = utils::numeric(FLERR,arg[2],false,lmp);
@@ -566,7 +556,7 @@ void ImproperClass2::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for improper coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for improper coefficients" + utils::errorurl(21));
 
   for (int i = ilo; i <= ihi; i++)
     if (setflag_i[i] == 1 && setflag_aa[i] == 1) setflag[i] = 1;
@@ -852,4 +842,16 @@ void ImproperClass2::write_data(FILE *fp)
     fprintf(fp,"%d %g %g %g %g %g %g\n",i,aa_k1[i],aa_k2[i],aa_k3[i],
             aa_theta0_1[i]*180.0/MY_PI,aa_theta0_2[i]*180.0/MY_PI,
             aa_theta0_3[i]*180.0/MY_PI);
+}
+
+/* ----------------------------------------------------------------------
+   return ptr to internal members upon request
+------------------------------------------------------------------------ */
+
+void *ImproperClass2::extract(const char *str, int &dim)
+{
+  dim = 1;
+  if (strcmp(str, "k") == 0) return (void *) k0;
+  if (strcmp(str, "chi0") == 0) return (void *) chi0;
+  return nullptr;
 }

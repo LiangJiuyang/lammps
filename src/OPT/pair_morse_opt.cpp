@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -56,12 +57,14 @@ void PairMorseOpt::compute(int eflag, int vflag)
 template < int EVFLAG, int EFLAG, int NEWTON_PAIR >
 void PairMorseOpt::eval()
 {
+// NOLINTBEGIN
   typedef struct { double x,y,z; } vec3_t;
 
   typedef struct {
     double cutsq,r0,alpha,morse1,d0,offset;
     double _pad[2];
   } fast_alpha_t;
+// NOLINTEND
 
   int i,j,ii,jj,inum,jnum,itype,jtype,sbindex;
   double factor_lj;
@@ -78,13 +81,13 @@ void PairMorseOpt::eval()
   int** _noalias firstneigh = list->firstneigh;
   int* _noalias numneigh = list->numneigh;
 
-  vec3_t* _noalias xx = (vec3_t*)x[0];
-  vec3_t* _noalias ff = (vec3_t*)f[0];
+  auto * _noalias xx = (vec3_t*)x[0];
+  auto * _noalias ff = (vec3_t*)f[0];
 
   int ntypes = atom->ntypes;
   int ntypes2 = ntypes*ntypes;
 
-  fast_alpha_t* _noalias fast_alpha =
+  auto * _noalias fast_alpha =
     (fast_alpha_t*) malloc(ntypes2*sizeof(fast_alpha_t));
   for (i = 0; i < ntypes; i++) for (j = 0; j < ntypes; j++) {
     fast_alpha_t& a = fast_alpha[i*ntypes+j];
@@ -95,7 +98,7 @@ void PairMorseOpt::eval()
     a.d0 = d0[i+1][j+1];
     a.offset = offset[i+1][j+1];
   }
-  fast_alpha_t* _noalias tabsix = fast_alpha;
+  auto * _noalias tabsix = fast_alpha;
 
   // loop over neighbors of my atoms
 
@@ -112,7 +115,7 @@ void PairMorseOpt::eval()
     double tmpfy = 0.0;
     double tmpfz = 0.0;
 
-    fast_alpha_t* _noalias tabsixi = (fast_alpha_t*)&tabsix[itype*ntypes];
+    auto * _noalias tabsixi = (fast_alpha_t*)&tabsix[itype*ntypes];
 
     for (jj = 0; jj < jnum; jj++) {
       j = jlist[jj];
@@ -191,7 +194,7 @@ void PairMorseOpt::eval()
     ff[i].z += tmpfz;
   }
 
-  free(fast_alpha); fast_alpha = 0;
+  free(fast_alpha); fast_alpha = nullptr;
 
   if (vflag_fdotr) virial_fdotr_compute();
 }

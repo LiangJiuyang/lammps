@@ -6,7 +6,7 @@ timer command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    timer args
 
@@ -81,13 +81,13 @@ which can be set with the *every* keyword. Default is checking
 every 10 steps. After the timer timeout has expired all subsequent
 run or minimize commands in the input script will be skipped.
 The remaining time or timer status can be accessed with the
-:doc:`thermo <thermo_style>` variable *timeremain*\ , which will be
+:doc:`thermo <thermo_style>` variable *timeremain*, which will be
 zero, if the timeout is inactive (default setting), it will be
 negative, if the timeout time is expired and positive if there
 is time remaining and in this case the value of the variable are
 the number of seconds remaining.
 
-When the *timeout* key word is used a second time, the timer is
+When the *timeout* keyword is used a second time, the timer is
 restarted with a new time limit. The timeout *elapse* value can
 be specified as *off* or *unlimited* to impose a no timeout condition
 (which is the default).  The *elapse* setting can be specified as

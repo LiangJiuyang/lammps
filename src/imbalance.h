@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -14,7 +14,7 @@
 #ifndef LMP_IMBALANCE_H
 #define LMP_IMBALANCE_H
 
-#include "pointers.h"  // IWYU pragma: export
+#include "pointers.h"    // IWYU pragma: export
 #include <string>
 
 namespace LAMMPS_NS {
@@ -22,7 +22,6 @@ namespace LAMMPS_NS {
 class Imbalance : protected Pointers {
  public:
   Imbalance(class LAMMPS *);
-  virtual ~Imbalance() {};
 
   // parse options. return number of arguments consumed (required)
   virtual int options(int, char **) = 0;
@@ -40,6 +39,6 @@ class Imbalance : protected Pointers {
   //Imbalance &operator=(const Imbalance &) {return *this;};
 };
 
-}
+}    // namespace LAMMPS_NS
 
 #endif

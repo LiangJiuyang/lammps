@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-
-FixStyle(rx/kk,FixRxKokkos<LMPDeviceType>)
-FixStyle(rx/kk/device,FixRxKokkos<LMPDeviceType>)
-FixStyle(rx/kk/host,FixRxKokkos<LMPHostType>)
-
+// clang-format off
+FixStyle(rx/kk,FixRxKokkos<LMPDeviceType>);
+FixStyle(rx/kk/device,FixRxKokkos<LMPDeviceType>);
+FixStyle(rx/kk/host,FixRxKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_FIX_RX_KOKKOS_H
 #define LMP_FIX_RX_KOKKOS_H
 
@@ -58,31 +59,22 @@ struct s_CounterType
     nFails += rhs.nFails;
     return *this;
   }
-
-  KOKKOS_INLINE_FUNCTION
-  volatile s_CounterType& operator+=(const volatile s_CounterType &rhs) volatile
-  {
-    nSteps += rhs.nSteps;
-    nIters += rhs.nIters;
-    nFuncs += rhs.nFuncs;
-    nFails += rhs.nFails;
-    return *this;
-  }
 };
 typedef struct s_CounterType CounterType;
 
 template <class DeviceType>
 class FixRxKokkos : public FixRX {
  public:
+  typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
 
   FixRxKokkos(class LAMMPS *, int, char **);
-  virtual ~FixRxKokkos();
-  virtual void init();
-  void init_list(int, class NeighList *);
-  void post_constructor();
-  virtual void setup_pre_force(int);
-  virtual void pre_force(int);
+  ~FixRxKokkos() override;
+  void init() override;
+  void init_list(int, class NeighList *) override;
+  void post_constructor() override;
+  void setup_pre_force(int) override;
+  void pre_force(int) override;
 
   // Define a value_type here for the reduction operator on CounterType.
   typedef CounterType value_type;
@@ -134,8 +126,8 @@ class FixRxKokkos : public FixRX {
   template <int stride = 1>
   struct UserRHSDataKokkos
   {
-    StridedArrayType<double,1> kFor;
-    StridedArrayType<double,1> rxnRateLaw;
+    StridedArrayType<KK_FLOAT,1> kFor;
+    StridedArrayType<KK_FLOAT,1> rxnRateLaw;
   };
 
   void solve_reactions(const int vflag, const bool isPreForce);
@@ -195,15 +187,15 @@ class FixRxKokkos : public FixRX {
                   double& h0, VectorType& y, VectorType& rwk, UserDataType& userData) const;
 
   //!< ODE Solver diagnostics.
-  void odeDiagnostics(void);
+  void odeDiagnostics();
 
   //!< Special counters per-ode.
   int *diagnosticCounterPerODEnSteps;
   int *diagnosticCounterPerODEnFuncs;
   DAT::tdual_int_1d k_diagnosticCounterPerODEnSteps;
   DAT::tdual_int_1d k_diagnosticCounterPerODEnFuncs;
-  //typename ArrayTypes<DeviceType>::t_int_1d d_diagnosticCounterPerODEnSteps;
-  //typename ArrayTypes<DeviceType>::t_int_1d d_diagnosticCounterPerODEnFuncs;
+  //typename AT::t_int_1d d_diagnosticCounterPerODEnSteps;
+  //typename AT::t_int_1d d_diagnosticCounterPerODEnFuncs;
   typename AT::t_int_1d d_diagnosticCounterPerODEnSteps;
   typename AT::t_int_1d d_diagnosticCounterPerODEnFuncs;
   HAT::t_int_1d h_diagnosticCounterPerODEnSteps;
@@ -213,14 +205,14 @@ class FixRxKokkos : public FixRX {
   struct KineticsType
   {
     // Arrhenius rate coefficients.
-    typename ArrayTypes<KokkosDeviceType>::t_float_1d Arr, nArr, Ea;
+    typename ArrayTypes<KokkosDeviceType>::t_kkfloat_1d Arr, nArr, Ea;
 
     // Dense versions.
-    typename ArrayTypes<KokkosDeviceType>::t_float_2d stoich, stoichReactants, stoichProducts;
+    typename ArrayTypes<KokkosDeviceType>::t_kkfloat_2d stoich, stoichReactants, stoichProducts;
 
     // Sparse versions.
     typename ArrayTypes<KokkosDeviceType>::t_int_2d   nuk, inu;
-    typename ArrayTypes<KokkosDeviceType>::t_float_2d nu;
+    typename ArrayTypes<KokkosDeviceType>::t_kkfloat_2d nu;
     typename ArrayTypes<KokkosDeviceType>::t_int_1d   isIntegral;
   };
 
@@ -230,30 +222,30 @@ class FixRxKokkos : public FixRX {
 
   bool update_kinetics_data;
 
-  void create_kinetics_data(void);
+  void create_kinetics_data();
 
   // Need a dual-view and device-view for dpdThetaLocal and sumWeights since they're used in several callbacks.
-  DAT::tdual_efloat_1d k_dpdThetaLocal, k_sumWeights;
-  //typename ArrayTypes<DeviceType>::t_efloat_1d d_dpdThetaLocal, d_sumWeights;
-  typename AT::t_efloat_1d d_dpdThetaLocal, d_sumWeights;
-  HAT::t_efloat_1d h_dpdThetaLocal, h_sumWeights;
+  DAT::ttransform_kkfloat_1d k_dpdThetaLocal, k_sumWeights;
+  //typename AT::t_kkfloat_1d d_dpdThetaLocal, d_sumWeights;
+  typename AT::t_kkfloat_1d d_dpdThetaLocal, d_sumWeights;
+  HAT::t_double_1d h_dpdThetaLocal, h_sumWeights;
 
-  typename ArrayTypes<DeviceType>::t_x_array_randomread d_x       ;
-  typename ArrayTypes<DeviceType>::t_int_1d_randomread  d_type    ;
-  typename ArrayTypes<DeviceType>::t_efloat_1d          d_dpdTheta;
+  typename AT::t_kkfloat_1d_3_lr_randomread d_x;
+  typename AT::t_int_1d_randomread  d_type;
+  typename AT::t_kkfloat_1d          d_dpdTheta;
 
-  typename ArrayTypes<DeviceType>::tdual_ffloat_2d k_cutsq;
-  typename ArrayTypes<DeviceType>::t_ffloat_2d     d_cutsq;
+  DAT::ttransform_kkfloat_2d k_cutsq;
+  typename AT::t_kkfloat_2d     d_cutsq;
   //double **h_cutsq;
 
-  typename ArrayTypes<DeviceType>::t_neighbors_2d d_neighbors;
-  typename ArrayTypes<DeviceType>::t_int_1d       d_ilist    ;
-  typename ArrayTypes<DeviceType>::t_int_1d       d_numneigh ;
+  typename AT::t_neighbors_2d d_neighbors;
+  typename AT::t_int_1d       d_ilist;
+  typename AT::t_int_1d       d_numneigh;
 
-  typename ArrayTypes<DeviceType>::t_float_2d  d_dvector;
-  typename ArrayTypes<DeviceType>::t_int_1d    d_mask   ;
+  typename AT::t_kkfloat_2d  d_dvector;
+  typename AT::t_int_1d    d_mask;
 
-  typename ArrayTypes<DeviceType>::t_double_1d d_scratchSpace;
+  typename AT::t_kkfloat_1d d_scratchSpace;
   size_t scratchSpaceSize;
 
   // Error flag for any failures.
@@ -262,10 +254,10 @@ class FixRxKokkos : public FixRX {
   template <int WT_FLAG, int LOCAL_TEMP_FLAG, bool NEWTON_PAIR, int NEIGHFLAG>
   void computeLocalTemperature();
 
-  int pack_reverse_comm(int, int, double *);
-  void unpack_reverse_comm(int, int *, double *);
-  int pack_forward_comm(int , int *, double *, int, int *);
-  void unpack_forward_comm(int , int , double *);
+  int pack_reverse_comm(int, int, double *) override;
+  void unpack_reverse_comm(int, int *, double *) override;
+  int pack_forward_comm(int , int *, double *, int, int *) override;
+  void unpack_forward_comm(int , int , double *) override;
 
  //private: // replicate a few from FixRX
   int my_restartFlag;
@@ -277,6 +269,3 @@ class FixRxKokkos : public FixRX {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-*/

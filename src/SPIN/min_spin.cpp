@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -35,9 +36,8 @@ using namespace MathConst;
 
 // EPS_ENERGY = minimum normalization for energy tolerance
 
-#define EPS_ENERGY 1.0e-8
-
-#define DELAYSTEP 5
+static constexpr double EPS_ENERGY = 1.0e-8;
+static constexpr int DELAYSTEP = 5;
 
 /* ---------------------------------------------------------------------- */
 

@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -17,6 +17,7 @@
 #else
 #include "error.h"
 #endif
+
 
 using namespace LAMMPS_NS;
 
@@ -38,23 +39,18 @@ Python::~Python()
 
 /* ---------------------------------------------------------------------- */
 
-PythonInterface::~PythonInterface()
-{
-}
-
-/* ---------------------------------------------------------------------- */
-
 void Python::init()
 {
 #if defined(LMP_PYTHON)
   if (!impl) impl = new PythonImpl(lmp);
 #else
-  error->all(FLERR,"Python support missing! Compile with PYTHON package installed!");
+  error->all(FLERR, Error::NOLASTLINE, "Python support missing! Compile with PYTHON package installed!");
 #endif
 }
 
 /* ---------------------------------------------------------------------- */
-bool Python::is_enabled() const {
+bool Python::is_enabled() const
+{
 #if defined(LMP_PYTHON)
   return true;
 #else
@@ -72,10 +68,10 @@ void Python::command(int narg, char **arg)
 
 /* ------------------------------------------------------------------ */
 
-void Python::invoke_function(int ifunc, char *result)
+void Python::invoke_function(int ifunc, char *result, double *dvalue)
 {
   init();
-  impl->invoke_function(ifunc, result);
+  impl->invoke_function(ifunc, result, dvalue);
 }
 
 /* ------------------------------------------------------------------ */
@@ -88,15 +84,24 @@ int Python::find(const char *name)
 
 /* ------------------------------------------------------------------ */
 
-int Python::variable_match(const char *name, const char *varname, int numeric)
+int Python::function_match(const char *name, const char *varname, int numeric, Error *errptr)
 {
   init();
-  return impl->variable_match(name, varname, numeric);
+  return impl->function_match(name, varname, numeric, errptr);
 }
 
 /* ------------------------------------------------------------------ */
 
-char * Python::long_string(int ifunc)
+int Python::wrapper_match(const char *name, const char *varname, int narg, int *argvars,
+                          Error *errptr)
+{
+  init();
+  return impl->wrapper_match(name, varname, narg, argvars, errptr);
+}
+
+/* ------------------------------------------------------------------ */
+
+char *Python::long_string(int ifunc)
 {
   init();
   return impl->long_string(ifunc);
@@ -124,4 +129,13 @@ bool Python::has_minimum_version(int major, int minor)
 {
   init();
   return impl->has_minimum_version(major, minor);
+}
+
+/* ------------------------------------------------------------------ */
+
+void Python::finalize()
+{
+#if defined(LMP_PYTHON)
+  PythonImpl::finalize();
+#endif
 }

@@ -53,13 +53,15 @@ Restrictions
 """"""""""""
 
 This bond style can only be used if LAMMPS was built with the MOLECULE
-package.  See the :doc:`Build package <Build_package>` doc page for more
+package.  See the :doc:`Build package <Build_package>` page for more
 info.
 
 Related commands
 """"""""""""""""
 
 :doc:`bond_coeff <bond_coeff>`, :doc:`delete_bonds <delete_bonds>`
+:doc:`bond style harmonic/shift <bond_harmonic_shift>`,
+:doc:`bond style harmonic/shift/cut <bond_harmonic_shift_cut>`
 
 Default
 """""""

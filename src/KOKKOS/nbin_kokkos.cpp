@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -16,12 +17,11 @@
 #include "atom_kokkos.h"
 #include "atom_masks.h"
 #include "comm.h"
+#include "kokkos.h"
+#include "memory_kokkos.h"
 #include "update.h"
 
 using namespace LAMMPS_NS;
-
-#define SMALL 1.0e-6
-#define CUT2BIN_RATIO 100
 
 /* ---------------------------------------------------------------------- */
 
@@ -32,6 +32,9 @@ NBinKokkos<DeviceType>::NBinKokkos(LAMMPS *lmp) : NBinStandard(lmp) {
   d_resize = typename AT::t_int_scalar("NeighborKokkosFunctor::resize");
   h_resize = Kokkos::create_mirror_view(d_resize);
   h_resize() = 1;
+
+  if (lmp->kokkos->nbin_atoms_per_bin_set)
+    atoms_per_bin = lmp->kokkos->nbin_atoms_per_bin;
 
   kokkos = 1;
 }
@@ -60,15 +63,15 @@ NBinKokkos<DeviceType>::NBinKokkos(LAMMPS *lmp) : NBinStandard(lmp) {
 template<class DeviceType>
 void NBinKokkos<DeviceType>::bin_atoms_setup(int nall)
 {
-  if (mbins > (int)k_bins.d_view.extent(0)) {
-    k_bins = DAT::tdual_int_2d("Neighbor::d_bins",mbins,atoms_per_bin);
+  if (mbins > (int)k_bins.view_device().extent(0)) {
+    MemoryKokkos::realloc_kokkos(k_bins,"Neighbor::d_bins",mbins,atoms_per_bin);
     bins = k_bins.view<DeviceType>();
 
-    k_bincount = DAT::tdual_int_1d("Neighbor::d_bincount",mbins);
+    MemoryKokkos::realloc_kokkos(k_bincount,"Neighbor::d_bincount",mbins);
     bincount = k_bincount.view<DeviceType>();
   }
-  if (nall > (int)k_atom2bin.d_view.extent(0)) {
-    k_atom2bin = DAT::tdual_int_1d("Neighbor::d_atom2bin",nall);
+  if (nall > (int)k_atom2bin.view_device().extent(0)) {
+    MemoryKokkos::realloc_kokkos(k_atom2bin,"Neighbor::d_atom2bin",nall);
     atom2bin = k_atom2bin.view<DeviceType>();
   }
 }
@@ -90,7 +93,7 @@ void NBinKokkos<DeviceType>::bin_atoms()
 
   while (h_resize() > 0) {
     h_resize() = 0;
-    deep_copy(d_resize, h_resize);
+    Kokkos::deep_copy(d_resize, h_resize);
 
     MemsetZeroFunctor<DeviceType> f_zero;
     f_zero.ptr = (void*) k_bincount.view<DeviceType>().data();
@@ -106,11 +109,11 @@ void NBinKokkos<DeviceType>::bin_atoms()
 
     Kokkos::parallel_for(atom->nlocal+atom->nghost, f);
 
-    deep_copy(h_resize, d_resize);
+    Kokkos::deep_copy(h_resize, d_resize);
     if (h_resize()) {
 
       atoms_per_bin += 16;
-      k_bins = DAT::tdual_int_2d("bins", mbins, atoms_per_bin);
+      k_bins = DAT::tdual_int_2d("Neighbor::bins", mbins, atoms_per_bin);
       bins = k_bins.view<DeviceType>();
       c_bins = bins;
     }

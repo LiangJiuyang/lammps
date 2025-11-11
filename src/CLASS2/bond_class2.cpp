@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -15,10 +16,8 @@
    Contributing author: Eric Simon (Cray)
 ------------------------------------------------------------------------- */
 
-#include <cstring>
 #include "bond_class2.h"
 
-#include <cmath>
 #include "atom.h"
 #include "neighbor.h"
 #include "comm.h"
@@ -26,12 +25,17 @@
 #include "memory.h"
 #include "error.h"
 
+#include <cmath>
+#include <cstring>
 
 using namespace LAMMPS_NS;
 
 /* ---------------------------------------------------------------------- */
 
-BondClass2::BondClass2(LAMMPS *lmp) : Bond(lmp) {}
+BondClass2::BondClass2(LAMMPS *lmp) : Bond(lmp)
+{
+  born_matrix_enable = 1;
+}
 
 /* ---------------------------------------------------------------------- */
 
@@ -130,7 +134,7 @@ void BondClass2::allocate()
 
 void BondClass2::coeff(int narg, char **arg)
 {
-  if (narg != 5) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (narg != 5) error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi;
@@ -151,7 +155,7 @@ void BondClass2::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -224,9 +228,23 @@ double BondClass2::single(int type, double rsq, int /*i*/, int /*j*/, double &ff
 
 /* ---------------------------------------------------------------------- */
 
+void BondClass2::born_matrix(int type, double rsq, int /*i*/, int /*j*/, double &du, double &du2)
+{
+  double r = sqrt(rsq);
+  double dr = r - r0[type];
+  du = 0.0;
+  du2 = 2*k2[type] + 6*k3[type]*dr + 12*k4[type]*dr*dr;
+  if (r > 0.0) du = 2*k2[type]*dr + 3*k3[type]*dr*dr + 4*k4[type]*dr*dr*dr;
+}
+
+/* ---------------------------------------------------------------------- */
+
 void *BondClass2::extract(const char *str, int &dim)
 {
   dim = 1;
+  if (strcmp(str, "k2") == 0) return (void *) k2;
+  if (strcmp(str, "k3") == 0) return (void *) k3;
+  if (strcmp(str, "k4") == 0) return (void *) k4;
   if (strcmp(str,"r0")==0) return (void*) r0;
   return nullptr;
 }

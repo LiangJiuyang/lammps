@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef PAIR_CLASS
-
-PairStyle(table/rx/kk,PairTableRXKokkos<LMPDeviceType>)
-PairStyle(table/rx/kk/device,PairTableRXKokkos<LMPDeviceType>)
-PairStyle(table/rx/kk/host,PairTableRXKokkos<LMPHostType>)
-
+// clang-format off
+PairStyle(table/rx/kk,PairTableRXKokkos<LMPDeviceType>);
+PairStyle(table/rx/kk/device,PairTableRXKokkos<LMPDeviceType>);
+PairStyle(table/rx/kk/host,PairTableRXKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_PAIR_TABLE_RX_KOKKOS_H
 #define LMP_PAIR_TABLE_RX_KOKKOS_H
 
@@ -32,84 +33,84 @@ class PairTableRXKokkos : public PairTable {
  public:
   enum {EnabledNeighFlags=FULL|HALFTHREAD|HALF};
   typedef DeviceType device_type;
+  typedef ArrayTypes<DeviceType> AT;
 
   PairTableRXKokkos(class LAMMPS *);
-  virtual ~PairTableRXKokkos();
+  ~PairTableRXKokkos() override;
 
-  virtual void compute(int, int);
+  void compute(int, int) override;
 
   template<int TABSTYLE>
   void compute_style(int, int);
 
-  void settings(int, char **);
-  void coeff(int, char **);
-  double init_one(int, int);
-  virtual double single(int, int, int, int, double, double, double, double &);
+  void settings(int, char **) override;
+  void coeff(int, char **) override;
+  double init_one(int, int) override;
+  double single(int, int, int, int, double, double, double, double &) override;
 
-  void init_style();
+  void init_style() override;
 
   struct TableDeviceConst {
-    typename ArrayTypes<DeviceType>::t_ffloat_2d cutsq;
-    typename ArrayTypes<DeviceType>::t_int_2d tabindex;
-    typename ArrayTypes<DeviceType>::t_int_1d nshiftbits,nmask;
-    typename ArrayTypes<DeviceType>::t_ffloat_1d innersq,invdelta,deltasq6;
-    typename ArrayTypes<DeviceType>::t_ffloat_2d_randomread rsq,drsq,e,de,f,df,e2,f2;
+    typename AT::t_double_2d_lr cutsq;
+    typename AT::t_int_2d_lr tabindex;
+    typename AT::t_int_1d nshiftbits,nmask;
+    typename AT::t_double_1d innersq,invdelta,deltasq6;
+    typename AT::t_double_2d_lr_randomread rsq,drsq,e,de,f,df,e2,f2;
   };
 
   struct TableDevice {
-    typename ArrayTypes<DeviceType>::t_ffloat_2d cutsq;
-    typename ArrayTypes<DeviceType>::t_int_2d tabindex;
-    typename ArrayTypes<DeviceType>::t_int_1d nshiftbits,nmask;
-    typename ArrayTypes<DeviceType>::t_ffloat_1d innersq,invdelta,deltasq6;
-    typename ArrayTypes<DeviceType>::t_ffloat_2d rsq,drsq,e,de,f,df,e2,f2;
+    typename AT::t_double_2d_lr cutsq;
+    typename AT::t_int_2d_lr tabindex;
+    typename AT::t_int_1d nshiftbits,nmask;
+    typename AT::t_double_1d innersq,invdelta,deltasq6;
+    typename AT::t_double_2d_lr rsq,drsq,e,de,f,df,e2,f2;
   };
 
   struct TableHost {
-    typename ArrayTypes<LMPHostType>::t_ffloat_2d cutsq;
-    typename ArrayTypes<LMPHostType>::t_int_2d tabindex;
+    typename ArrayTypes<LMPHostType>::t_double_2d_lr cutsq;
+    typename ArrayTypes<LMPHostType>::t_int_2d_lr tabindex;
     typename ArrayTypes<LMPHostType>::t_int_1d nshiftbits,nmask;
-    typename ArrayTypes<LMPHostType>::t_ffloat_1d innersq,invdelta,deltasq6;
-    typename ArrayTypes<LMPHostType>::t_ffloat_2d rsq,drsq,e,de,f,df,e2,f2;
+    typename ArrayTypes<LMPHostType>::t_double_1d innersq,invdelta,deltasq6;
+    typename ArrayTypes<LMPHostType>::t_double_2d_lr rsq,drsq,e,de,f,df,e2,f2;
   };
 
   TableDeviceConst d_table_const;
   TableDevice* d_table;
   TableHost* h_table;
 
-  Few<Few<F_FLOAT, MAX_TYPES_STACKPARAMS+1>, MAX_TYPES_STACKPARAMS+1> m_cutsq;
+  Few<Few<double, MAX_TYPES_STACKPARAMS+1>, MAX_TYPES_STACKPARAMS+1> m_cutsq;
 
-  typename ArrayTypes<DeviceType>::t_ffloat_2d d_cutsq;
+  typename AT::t_double_2d_lr d_cutsq;
 
-  virtual void allocate();
-  void compute_table(Table *);
+  void allocate() override;
+  void compute_table(Table *) override;
 
-  typename ArrayTypes<DeviceType>::t_x_array_randomread x;
-  typename ArrayTypes<DeviceType>::t_f_array f;
+  typename AT::t_kkfloat_1d_3_lr_randomread x;
+  typename AT::t_kkacc_1d_3 f;
 
   int neighflag;
 
   int update_table;
   void create_kokkos_tables();
-  void cleanup_copy();
 
   friend void pair_virial_fdotr_compute<PairTableRXKokkos>(PairTableRXKokkos*);
 
   /* PairTableRX members */
 
-  Kokkos::View<double*, DeviceType> mixWtSite1old;
-  Kokkos::View<double*, DeviceType> mixWtSite2old;
-  Kokkos::View<double*, DeviceType> mixWtSite1;
-  Kokkos::View<double*, DeviceType> mixWtSite2;
+  Kokkos::View<KK_FLOAT*, DeviceType> mixWtSite1old;
+  Kokkos::View<KK_FLOAT*, DeviceType> mixWtSite2old;
+  Kokkos::View<KK_FLOAT*, DeviceType> mixWtSite1;
+  Kokkos::View<KK_FLOAT*, DeviceType> mixWtSite2;
 
   int nspecies;
   char *site1, *site2;
   int isite1, isite2;
   bool fractionalWeighting;
 
-  typename ArrayTypes<DeviceType>::tdual_efloat_1d k_eatom;
-  typename ArrayTypes<DeviceType>::tdual_virial_array k_vatom;
-  typename ArrayTypes<DeviceType>::t_efloat_1d d_eatom;
-  typename ArrayTypes<DeviceType>::t_virial_array d_vatom;
+  DAT::ttransform_kkacc_1d k_eatom;
+  DAT::ttransform_kkacc_1d_6 k_vatom;
+  typename AT::t_kkacc_1d d_eatom;
+  typename AT::t_kkacc_1d_6 d_vatom;
 };
 
 }
@@ -117,6 +118,3 @@ class PairTableRXKokkos : public PairTable {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
- */

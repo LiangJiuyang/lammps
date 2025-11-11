@@ -1,64 +1,84 @@
-/*
 //@HEADER
 // ************************************************************************
 //
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
+//                        Kokkos v. 4.0
+//       Copyright (2022) National Technology & Engineering
 //               Solutions of Sandia, LLC (NTESS).
 //
 // Under the terms of Contract DE-NA0003525 with NTESS,
 // the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
+// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
+// See https://kokkos.org/LICENSE for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
 //@HEADER
-*/
 
 #ifndef KOKKOS_IMPL_KOKKOS_PROFILING_HPP
 #define KOKKOS_IMPL_KOKKOS_PROFILING_HPP
 
-#include <impl/Kokkos_Profiling_Interface.hpp>
-#include <Kokkos_Macros.hpp>
+#ifndef KOKKOS_IMPL_PUBLIC_INCLUDE
+#define KOKKOS_IMPL_PUBLIC_INCLUDE
+#define KOKKOS_IMPL_PUBLIC_INCLUDE_NOTDEFINED_PROFILING
+#endif
+
 #include <Kokkos_Core_fwd.hpp>
 #include <Kokkos_ExecPolicy.hpp>
+#include <Kokkos_Macros.hpp>
 #include <Kokkos_Tuners.hpp>
-#include <string>
+#include <impl/Kokkos_Profiling_Interface.hpp>
+#include <memory>
+#include <iosfwd>
+#include <unordered_map>
 #include <map>
+#include <string>
 #include <type_traits>
+#include <mutex>
 namespace Kokkos {
 
 // forward declaration
+bool show_warnings() noexcept;
 bool tune_internals() noexcept;
 
 namespace Tools {
+
+struct InitArguments {
+  // NOTE DZP: PossiblyUnsetOption was introduced
+  // before C++17, std::optional is a better choice
+  // for this long-term
+  static const std::string unset_string_option;
+  enum PossiblyUnsetOption { unset, off, on };
+  PossiblyUnsetOption help = unset;
+  std::string lib          = unset_string_option;
+  std::string args         = unset_string_option;
+};
+
+namespace Impl {
+
+struct InitializationStatus {
+  enum InitializationResult {
+    success,
+    failure,
+    help_request,
+    environment_argument_mismatch
+  };
+  InitializationResult result;
+  std::string error_message;
+};
+InitializationStatus initialize_tools_subsystem(
+    const Kokkos::Tools::InitArguments& args);
+
+void parse_command_line_arguments(int& narg, char* arg[],
+                                  InitArguments& arguments);
+Kokkos::Tools::Impl::InitializationStatus parse_environment_variables(
+    InitArguments& arguments);
+
+template <typename PolicyType, typename Functor>
+struct ToolResponse {
+  PolicyType policy;
+};
+
+}  // namespace Impl
 
 bool profileLibraryLoaded();
 
@@ -82,17 +102,17 @@ void destroyProfileSection(const uint32_t secID);
 
 void markEvent(const std::string& evName);
 
-void allocateData(const SpaceHandle space, const std::string label,
+void allocateData(const SpaceHandle space, const std::string& label,
                   const void* ptr, const uint64_t size);
-void deallocateData(const SpaceHandle space, const std::string label,
+void deallocateData(const SpaceHandle space, const std::string& label,
                     const void* ptr, const uint64_t size);
 
-void beginDeepCopy(const SpaceHandle dst_space, const std::string dst_label,
+void beginDeepCopy(const SpaceHandle dst_space, const std::string& dst_label,
                    const void* dst_ptr, const SpaceHandle src_space,
-                   const std::string src_label, const void* src_ptr,
+                   const std::string& src_label, const void* src_ptr,
                    const uint64_t size);
 void endDeepCopy();
-void beginFence(const std::string name, const uint32_t deviceId,
+void beginFence(const std::string& name, const uint32_t deviceId,
                 uint64_t* handle);
 void endFence(const uint64_t handle);
 
@@ -125,15 +145,79 @@ void syncDualView(const std::string& label, const void* const ptr,
 void modifyDualView(const std::string& label, const void* const ptr,
                     bool on_device);
 
-void initialize();
+void declareMetadata(const std::string& key, const std::string& value);
+void initialize(
+    const std::string& = {});  // should rename to impl_initialize ASAP
+void initialize(const Kokkos::Tools::InitArguments&);
+void initialize(int argc, char* argv[]);
 void finalize();
+bool printHelp(const std::string&);
+void parseArgs(const std::string&);
 
 Kokkos_Profiling_SpaceHandle make_space_handle(const char* space_name);
 
 namespace Experimental {
 
+namespace Impl {
+struct DirectFenceIDHandle {
+  uint32_t value;
+};
+//
+template <typename Space>
+uint32_t idForInstance(const uintptr_t instance) {
+  static std::mutex instance_mutex;
+  const std::lock_guard<std::mutex> lock(instance_mutex);
+  /** Needed to be a ptr due to initialization order problems*/
+  using map_type = std::map<uintptr_t, uint32_t>;
+
+  static std::shared_ptr<map_type> map;
+  if (map.get() == nullptr) {
+    map = std::make_shared<map_type>(map_type());
+  }
+
+  static uint32_t value = 0;
+  constexpr const uint32_t offset =
+      Kokkos::Tools::Experimental::NumReservedDeviceIDs;
+
+  auto find = map->find(instance);
+  if (find == map->end()) {
+    auto ret         = offset + value++;
+    (*map)[instance] = ret;
+    return ret;
+  }
+
+  return find->second;
+}
+
+template <typename Space, typename FencingFunctor>
+void profile_fence_event(const std::string& name, DirectFenceIDHandle devIDTag,
+                         const FencingFunctor& func) {
+  uint64_t handle = 0;
+  Kokkos::Tools::beginFence(
+      name,
+      Kokkos::Tools::Experimental::device_id_root<Space>() + devIDTag.value,
+      &handle);
+  func();
+  Kokkos::Tools::endFence(handle);
+}
+
+template <typename Space, typename FencingFunctor>
+void profile_fence_event(
+    const std::string& name,
+    Kokkos::Tools::Experimental::SpecialSynchronizationCases reason,
+    const FencingFunctor& func) {
+  uint64_t handle = 0;
+  Kokkos::Tools::beginFence(
+      name, device_id_root<Space>() + int_for_synchronization_reason(reason),
+      &handle);  // TODO: correct ID
+  func();
+  Kokkos::Tools::endFence(handle);
+}
+}  // namespace Impl
 void set_init_callback(initFunction callback);
 void set_finalize_callback(finalizeFunction callback);
+void set_parse_args_callback(parseArgsFunction callback);
+void set_print_help_callback(printHelpFunction callback);
 void set_begin_parallel_for_callback(beginFunction callback);
 void set_end_parallel_for_callback(endFunction callback);
 void set_begin_parallel_reduce_callback(beginFunction callback);
@@ -156,7 +240,10 @@ void set_begin_fence_callback(beginFenceFunction callback);
 void set_end_fence_callback(endFenceFunction callback);
 void set_dual_view_sync_callback(dualViewSyncFunction callback);
 void set_dual_view_modify_callback(dualViewModifyFunction callback);
-
+void set_declare_metadata_callback(declareMetadataFunction callback);
+void set_request_tool_settings_callback(requestToolSettingsFunction callback);
+void set_provide_tool_programming_interface_callback(
+    provideToolProgrammingInterfaceFunction callback);
 void set_declare_output_type_callback(outputTypeDeclarationFunction callback);
 void set_declare_input_type_callback(inputTypeDeclarationFunction callback);
 void set_request_output_values_callback(requestValueFunction callback);
@@ -178,345 +265,46 @@ size_t get_new_context_id();
 size_t get_current_context_id();
 }  // namespace Experimental
 
-namespace Impl {
-
-static std::map<std::string, Kokkos::Tools::Experimental::TeamSizeTuner>
-    team_tuners;
-
-template <class ReducerType, class ExecPolicy, class Functor, typename TagType>
-void tune_policy(const size_t, const std::string&, ExecPolicy&, const Functor&,
-                 TagType) {}
-
-template <class ExecPolicy, class Functor, typename TagType>
-void tune_policy(const size_t, const std::string&, ExecPolicy&, const Functor&,
-                 const TagType&) {}
-
-/**
- * Tuning for parallel_fors and parallel_scans is a fairly simple process.
- *
- * Tuning for a parallel_reduce turns out to be a little more complicated.
- *
- * If you're tuning a reducer, it might be a complex or a simple reducer
- * (an example of simple would be one where the join is just "+".
- *
- * Unfortunately these two paths are very different in terms of which classes
- * get instantiated. Thankfully, all of this complexity is encoded in the
- * ReducerType. If it's a "simple" reducer, this will be Kokkos::InvalidType,
- * otherwise it'll be something else.
- *
- * If the type is complex, for the code to be generally right you _must_
- * pass an instance of that ReducerType to functions that determine
- * eligible team sizes. If the type is simple, you can't construct one,
- * you use the simpler 2-arg formulation of team_size_recommended/max.
- */
-
-namespace Impl {
-
-struct SimpleTeamSizeCalculator {
-  template <typename Policy, typename Functor, typename Tag>
-  int get_max_team_size(const Policy& policy, const Functor& functor,
-                        const Tag tag) {
-    auto max = policy.team_size_max(functor, tag);
-    return max;
-  }
-  template <typename Policy, typename Functor, typename Tag>
-  int get_recommended_team_size(const Policy& policy, const Functor& functor,
-                                const Tag tag) {
-    auto max = policy.team_size_recommended(functor, tag);
-    return max;
-  }
-};
-
-// when we have a complex reducer, we need to pass an
-// instance to team_size_recommended/max. Reducers
-// aren't default constructible, but they are
-// constructible from a reference to an
-// instance of their value_type so we construct
-// a value_type and temporary reducer here
-template <typename ReducerType>
-struct ComplexReducerSizeCalculator {
-  template <typename Policy, typename Functor, typename Tag>
-  int get_max_team_size(const Policy& policy, const Functor& functor,
-                        const Tag tag) {
-    using value_type = typename ReducerType::value_type;
-    value_type value;
-    ReducerType reducer_example = ReducerType(value);
-    return policy.team_size_max(functor, reducer_example, tag);
-  }
-  template <typename Policy, typename Functor, typename Tag>
-  int get_recommended_team_size(const Policy& policy, const Functor& functor,
-                                const Tag tag) {
-    using value_type = typename ReducerType::value_type;
-    value_type value;
-    ReducerType reducer_example = ReducerType(value);
-    return policy.team_size_recommended(functor, reducer_example, tag);
-  }
-};
-
-}  // namespace Impl
-
-template <class Functor, class TagType, class... Properties>
-void tune_policy(const size_t /**tuning_context*/, const std::string& label_in,
-                 Kokkos::TeamPolicy<Properties...>& policy,
-                 const Functor& functor, const TagType& tag) {
-  if (policy.impl_auto_team_size() || policy.impl_auto_vector_length()) {
-    std::string label = label_in;
-    if (label_in.empty()) {
-      using policy_type =
-          typename std::remove_reference<decltype(policy)>::type;
-      using work_tag = typename policy_type::work_tag;
-      Kokkos::Impl::ParallelConstructName<Functor, work_tag> name(label);
-      label = name.get();
-    }
-    auto tuner_iter = [&]() {
-      auto my_tuner = team_tuners.find(label);
-      if (my_tuner == team_tuners.end()) {
-        return (team_tuners
-                    .emplace(label, Kokkos::Tools::Experimental::TeamSizeTuner(
-                                        label, policy, functor, tag,
-                                        Impl::SimpleTeamSizeCalculator{}))
-                    .first);
-      }
-      return my_tuner;
-    }();
-    tuner_iter->second.tune(policy);
-  }
-}
-
-template <class ReducerType, class Functor, class TagType, class... Properties>
-void tune_policy(const size_t /**tuning_context*/, const std::string& label_in,
-                 Kokkos::TeamPolicy<Properties...>& policy,
-                 const Functor& functor, const TagType& tag) {
-  if (policy.impl_auto_team_size() || policy.impl_auto_vector_length()) {
-    std::string label = label_in;
-    if (label_in.empty()) {
-      using policy_type =
-          typename std::remove_reference<decltype(policy)>::type;
-      using work_tag = typename policy_type::work_tag;
-      Kokkos::Impl::ParallelConstructName<Functor, work_tag> name(label);
-      label = name.get();
-    }
-    auto tuner_iter = [&]() {
-      auto my_tuner = team_tuners.find(label);
-      if (my_tuner == team_tuners.end()) {
-        return (
-            team_tuners
-                .emplace(label,
-                         Kokkos::Tools::Experimental::TeamSizeTuner(
-                             label, policy, functor, tag,
-                             Impl::ComplexReducerSizeCalculator<ReducerType>{}))
-                .first);
-      }
-      return my_tuner;
-    }();
-    tuner_iter->second.tune(policy);
-  }
-}
-
-template <class ReducerType>
-struct ReductionSwitcher {
-  template <class Functor, class TagType, class ExecPolicy>
-  static void tune(const size_t tuning_context, const std::string& label,
-                   ExecPolicy& policy, const Functor& functor,
-                   const TagType& tag) {
-    if (Kokkos::tune_internals()) {
-      tune_policy<ReducerType>(tuning_context, label, policy, functor, tag);
-    }
-  }
-};
-
-template <>
-struct ReductionSwitcher<Kokkos::InvalidType> {
-  template <class Functor, class TagType, class ExecPolicy>
-  static void tune(const size_t tuning_context, const std::string& label,
-                   ExecPolicy& policy, const Functor& functor,
-                   const TagType& tag) {
-    if (Kokkos::tune_internals()) {
-      tune_policy(tuning_context, label, policy, functor, tag);
-    }
-  }
-};
-
-template <class ExecPolicy, class Functor, typename TagType>
-void report_policy_results(const size_t, const std::string&, ExecPolicy&,
-                           const Functor&, const TagType&) {}
-
-template <class Functor, class TagType, class... Properties>
-void report_policy_results(const size_t /**tuning_context*/,
-                           const std::string& label_in,
-                           Kokkos::TeamPolicy<Properties...> policy,
-                           const Functor&, const TagType&) {
-  if (policy.impl_auto_team_size() || policy.impl_auto_vector_length()) {
-    std::string label = label_in;
-    if (label_in.empty()) {
-      using policy_type =
-          typename std::remove_reference<decltype(policy)>::type;
-      using work_tag = typename policy_type::work_tag;
-      Kokkos::Impl::ParallelConstructName<Functor, work_tag> name(label);
-      label = name.get();
-    }
-    auto& tuner = team_tuners[label];
-    tuner.end();
-  }
-}
-
-template <class ExecPolicy, class FunctorType>
-void begin_parallel_for(ExecPolicy& policy, FunctorType& functor,
-                        const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Impl::ParallelConstructName<FunctorType,
-                                        typename ExecPolicy::work_tag>
-        name(label);
-    Kokkos::Tools::beginParallelFor(
-        name.get(), Kokkos::Profiling::Experimental::device_id(policy.space()),
-        &kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_new_context_id();
-  if (Kokkos::tune_internals()) {
-    tune_policy(context_id, label, policy, functor, Kokkos::ParallelForTag{});
-  }
-#else
-  (void)functor;
-#endif
-}
-
-template <class ExecPolicy, class FunctorType>
-void end_parallel_for(ExecPolicy& policy, FunctorType& functor,
-                      const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Tools::endParallelFor(kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_current_context_id();
-  if (Kokkos::tune_internals()) {
-    report_policy_results(context_id, label, policy, functor,
-                          Kokkos::ParallelForTag{});
-  }
-#else
-  (void)policy;
-  (void)functor;
-  (void)label;
-#endif
-}
-
-template <class ExecPolicy, class FunctorType>
-void begin_parallel_scan(ExecPolicy& policy, FunctorType& functor,
-                         const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Impl::ParallelConstructName<FunctorType,
-                                        typename ExecPolicy::work_tag>
-        name(label);
-    Kokkos::Tools::beginParallelScan(
-        name.get(), Kokkos::Profiling::Experimental::device_id(policy.space()),
-        &kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_new_context_id();
-  if (Kokkos::tune_internals()) {
-    tune_policy(context_id, label, policy, functor, Kokkos::ParallelScanTag{});
-  }
-#else
-  (void)functor;
-#endif
-}
-
-template <class ExecPolicy, class FunctorType>
-void end_parallel_scan(ExecPolicy& policy, FunctorType& functor,
-                       const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Tools::endParallelScan(kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_current_context_id();
-  if (Kokkos::tune_internals()) {
-    report_policy_results(context_id, label, policy, functor,
-                          Kokkos::ParallelScanTag{});
-  }
-#else
-  (void)policy;
-  (void)functor;
-  (void)label;
-#endif
-}
-
-template <class ReducerType, class ExecPolicy, class FunctorType>
-void begin_parallel_reduce(ExecPolicy& policy, FunctorType& functor,
-                           const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Impl::ParallelConstructName<FunctorType,
-                                        typename ExecPolicy::work_tag>
-        name(label);
-    Kokkos::Tools::beginParallelReduce(
-        name.get(), Kokkos::Profiling::Experimental::device_id(policy.space()),
-        &kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_new_context_id();
-  ReductionSwitcher<ReducerType>::tune(context_id, label, policy, functor,
-                                       Kokkos::ParallelReduceTag{});
-#else
-  (void)functor;
-#endif
-}
-
-template <class ReducerType, class ExecPolicy, class FunctorType>
-void end_parallel_reduce(ExecPolicy& policy, FunctorType& functor,
-                         const std::string& label, uint64_t& kpID) {
-  if (Kokkos::Tools::profileLibraryLoaded()) {
-    Kokkos::Tools::endParallelReduce(kpID);
-  }
-#ifdef KOKKOS_ENABLE_TUNING
-  size_t context_id = Kokkos::Tools::Experimental::get_current_context_id();
-  if (Kokkos::tune_internals()) {
-    report_policy_results(context_id, label, policy, functor,
-                          Kokkos::ParallelReduceTag{});
-  }
-#else
-  (void)policy;
-  (void)functor;
-  (void)label;
-#endif
-}
-
-}  // namespace Impl
+namespace Impl {}  // namespace Impl
 
 }  // namespace Tools
 namespace Profiling {
 
-bool profileLibraryLoaded();
+// don't let ClangFormat reorder the using-declarations below
+// clang-format off
+using Kokkos::Tools::profileLibraryLoaded;
 
-void beginParallelFor(const std::string& kernelPrefix, const uint32_t devID,
-                      uint64_t* kernelID);
-void beginParallelReduce(const std::string& kernelPrefix, const uint32_t devID,
-                         uint64_t* kernelID);
-void beginParallelScan(const std::string& kernelPrefix, const uint32_t devID,
-                       uint64_t* kernelID);
-void endParallelFor(const uint64_t kernelID);
-void endParallelReduce(const uint64_t kernelID);
-void endParallelScan(const uint64_t kernelID);
-void pushRegion(const std::string& kName);
-void popRegion();
+using Kokkos::Tools::printHelp;
+using Kokkos::Tools::parseArgs;
 
-void createProfileSection(const std::string& sectionName, uint32_t* secID);
-void destroyProfileSection(const uint32_t secID);
-void startSection(const uint32_t secID);
+using Kokkos::Tools::initialize;
+using Kokkos::Tools::finalize;
 
-void stopSection(const uint32_t secID);
+using Kokkos::Tools::beginParallelFor;
+using Kokkos::Tools::beginParallelReduce;
+using Kokkos::Tools::beginParallelScan;
+using Kokkos::Tools::endParallelFor;
+using Kokkos::Tools::endParallelReduce;
+using Kokkos::Tools::endParallelScan;
 
-void markEvent(const std::string& eventName);
-void allocateData(const SpaceHandle handle, const std::string name,
-                  const void* data, const uint64_t size);
-void deallocateData(const SpaceHandle space, const std::string label,
-                    const void* ptr, const uint64_t size);
-void beginDeepCopy(const SpaceHandle dst_space, const std::string dst_label,
-                   const void* dst_ptr, const SpaceHandle src_space,
-                   const std::string src_label, const void* src_ptr,
-                   const uint64_t size);
-void endDeepCopy();
-void finalize();
-void initialize();
-SpaceHandle make_space_handle(const char* space_name);
+using Kokkos::Tools::allocateData;
+using Kokkos::Tools::deallocateData;
+
+using Kokkos::Tools::beginDeepCopy;
+using Kokkos::Tools::endDeepCopy;
+
+using Kokkos::Tools::pushRegion;
+using Kokkos::Tools::popRegion;
+
+using Kokkos::Tools::createProfileSection;
+using Kokkos::Tools::destroyProfileSection;
+using Kokkos::Tools::startSection;
+using Kokkos::Tools::stopSection;
+
+using Kokkos::Tools::markEvent;
+
+using Kokkos::Tools::make_space_handle;
+// clang-format on
 
 namespace Experimental {
 using Kokkos::Tools::Experimental::set_allocate_data_callback;
@@ -533,7 +321,9 @@ using Kokkos::Tools::Experimental::set_end_parallel_reduce_callback;
 using Kokkos::Tools::Experimental::set_end_parallel_scan_callback;
 using Kokkos::Tools::Experimental::set_finalize_callback;
 using Kokkos::Tools::Experimental::set_init_callback;
+using Kokkos::Tools::Experimental::set_parse_args_callback;
 using Kokkos::Tools::Experimental::set_pop_region_callback;
+using Kokkos::Tools::Experimental::set_print_help_callback;
 using Kokkos::Tools::Experimental::set_profile_event_callback;
 using Kokkos::Tools::Experimental::set_push_region_callback;
 using Kokkos::Tools::Experimental::set_start_profile_section_callback;
@@ -591,5 +381,10 @@ size_t get_new_variable_id();
 }  // namespace Tools
 
 }  // namespace Kokkos
+
+#ifdef KOKKOS_IMPL_PUBLIC_INCLUDE_NOTDEFINED_PROFILING
+#undef KOKKOS_IMPL_PUBLIC_INCLUDE
+#undef KOKKOS_IMPL_PUBLIC_INCLUDE_NOTDEFINED_PROFILING
+#endif
 
 #endif

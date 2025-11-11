@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -16,23 +17,22 @@
 ------------------------------------------------------------------------- */
 
 #include "pair_yukawa_kokkos.h"
-#include <cmath>
-#include "kokkos.h"
+
 #include "atom_kokkos.h"
+#include "atom_masks.h"
+#include "error.h"
 #include "force.h"
-#include "neighbor.h"
+#include "kokkos.h"
+#include "memory_kokkos.h"
 #include "neigh_list.h"
 #include "neigh_request.h"
-#include "update.h"
+#include "neighbor.h"
 #include "respa.h"
-#include "memory_kokkos.h"
-#include "error.h"
-#include "atom_masks.h"
+#include "update.h"
+
+#include <cmath>
 
 using namespace LAMMPS_NS;
-
-#define KOKKOS_CUDA_MAX_THREADS 256
-#define KOKKOS_CUDA_MIN_BLOCKS 8
 
 /* ---------------------------------------------------------------------- */
 
@@ -46,7 +46,6 @@ PairYukawaKokkos<DeviceType>::PairYukawaKokkos(LAMMPS *lmp) : PairYukawa(lmp)
   execution_space = ExecutionSpaceFromDevice<DeviceType>::space;
   datamask_read = X_MASK | F_MASK | TYPE_MASK | ENERGY_MASK | VIRIAL_MASK;
   datamask_modify = F_MASK | ENERGY_MASK | VIRIAL_MASK;
-  cutsq = nullptr;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -54,26 +53,13 @@ PairYukawaKokkos<DeviceType>::PairYukawaKokkos(LAMMPS *lmp) : PairYukawa(lmp)
 template<class DeviceType>
 PairYukawaKokkos<DeviceType>::~PairYukawaKokkos()
 {
+  if (copymode) return;
+
   if (allocated) {
     memoryKK->destroy_kokkos(k_eatom,eatom);
     memoryKK->destroy_kokkos(k_vatom,vatom);
-    k_cutsq = DAT::tdual_ffloat_2d();
-    memory->sfree(cutsq);
-    eatom = nullptr;
-    vatom = nullptr;
-    cutsq = nullptr;
+    memoryKK->destroy_kokkos(k_cutsq,cutsq);
   }
-}
-
-/* ---------------------------------------------------------------------- */
-
-template<class DeviceType>
-void PairYukawaKokkos<DeviceType>::cleanup_copy() {
-  // WHY needed: this prevents parent copy from deallocating any arrays
-  allocated = 0;
-  cutsq = nullptr;
-  eatom = nullptr;
-  vatom = nullptr;
 }
 
 /* ----------------------------------------------------------------------
@@ -115,26 +101,14 @@ void PairYukawaKokkos<DeviceType>::init_style()
       error->all(FLERR,"Cannot use Kokkos pair style with rRESPA inner/middle");
   }
 
-  // irequest = neigh request made by parent class
+  // adjust neighbor list request for KOKKOS
 
   neighflag = lmp->kokkos->neighflag;
-  int irequest = neighbor->nrequest - 1;
-
-  neighbor->requests[irequest]->
-    kokkos_host = std::is_same<DeviceType,LMPHostType>::value &&
-    !std::is_same<DeviceType,LMPDeviceType>::value;
-  neighbor->requests[irequest]->
-    kokkos_device = std::is_same<DeviceType,LMPDeviceType>::value;
-
-  if (neighflag == FULL) {
-    neighbor->requests[irequest]->full = 1;
-    neighbor->requests[irequest]->half = 0;
-  } else if (neighflag == HALF || neighflag == HALFTHREAD) {
-    neighbor->requests[irequest]->full = 0;
-    neighbor->requests[irequest]->half = 1;
-  } else {
-    error->all(FLERR,"Cannot use chosen neighbor list style with yukawa/kk");
-  }
+  auto request = neighbor->find_request(this);
+  request->set_kokkos_host(std::is_same_v<DeviceType,LMPHostType> &&
+                           !std::is_same_v<DeviceType,LMPDeviceType>);
+  request->set_kokkos_device(std::is_same_v<DeviceType,LMPDeviceType>);
+  if (neighflag == FULL) request->enable_full();
 }
 
 /* ----------------------------------------------------------------------
@@ -146,19 +120,19 @@ double PairYukawaKokkos<DeviceType>::init_one(int i, int j)
 {
   double cutone = PairYukawa::init_one(i,j);
 
-  k_params.h_view(i,j).a      = a[i][j];
-  k_params.h_view(i,j).offset = offset[i][j];
-  k_params.h_view(i,j).cutsq  = cutone*cutone;
-  k_params.h_view(j,i)        = k_params.h_view(i,j);
+  k_params.view_host()(i,j).a      = a[i][j];
+  k_params.view_host()(i,j).offset = offset[i][j];
+  k_params.view_host()(i,j).cutsq  = cutone*cutone;
+  k_params.view_host()(j,i)        = k_params.view_host()(i,j);
 
   if (i<MAX_TYPES_STACKPARAMS+1 && j<MAX_TYPES_STACKPARAMS+1) {
-    m_params[i][j] = m_params[j][i] = k_params.h_view(i,j);
+    m_params[i][j] = m_params[j][i] = k_params.view_host()(i,j);
     m_cutsq[j][i] = m_cutsq[i][j] = cutone*cutone;
   }
 
-  k_cutsq.h_view(i,j) = k_cutsq.h_view(j,i) = cutone*cutone;
-  k_cutsq.template modify<LMPHostType>();
-  k_params.template modify<LMPHostType>();
+  k_cutsq.view_host()(i,j) = k_cutsq.view_host()(j,i) = cutone*cutone;
+  k_cutsq.modify_host();
+  k_params.modify_host();
 
   return cutone;
 }
@@ -199,7 +173,6 @@ void PairYukawaKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
   c_x = atomKK->k_x.view<DeviceType>();
   f = atomKK->k_f.view<DeviceType>();
   type = atomKK->k_type.view<DeviceType>();
-  tag = atomKK->k_tag.view<DeviceType>();
   nlocal = atom->nlocal;
   nall = atom->nlocal + atom->nghost;
   newton_pair = force->newton_pair;
@@ -227,12 +200,12 @@ void PairYukawaKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
 
   if (eflag_atom) {
     k_eatom.template modify<DeviceType>();
-    k_eatom.template sync<LMPHostType>();
+    k_eatom.sync_host();
   }
 
   if (vflag_atom) {
     k_vatom.template modify<DeviceType>();
-    k_vatom.template sync<LMPHostType>();
+    k_vatom.sync_host();
   }
 }
 
@@ -241,25 +214,23 @@ void PairYukawaKokkos<DeviceType>::compute(int eflag_in, int vflag_in)
 template<class DeviceType>
 template<bool STACKPARAMS, class Specialisation>
 KOKKOS_INLINE_FUNCTION
-F_FLOAT PairYukawaKokkos<DeviceType>::
-compute_fpair(const F_FLOAT& rsq, const int& i, const int&j,
-              const int& itype, const int& jtype) const {
-  (void) i;
-  (void) j;
-  const F_FLOAT rr     = sqrt(rsq);
+KK_FLOAT PairYukawaKokkos<DeviceType>::
+compute_fpair(const KK_FLOAT &rsq, const int &, const int &,
+              const int &itype, const int &jtype) const {
+  const KK_FLOAT rr     = sqrt(rsq);
   // Fetch the params either off the stack or from some mapped memory?
-  const F_FLOAT aa     = STACKPARAMS ? m_params[itype][jtype].a
+  const KK_FLOAT aa     = STACKPARAMS ? m_params[itype][jtype].a
                                      : params(itype,jtype).a;
 
   // U   = a * exp(-kappa*r) / r
   // f   = (kappa * a * exp(-kappa*r) / r + a*exp(-kappa*r)/r^2)*grad(r)
   //     = (kappa + 1/r) * (a * exp(-kappa*r) / r)
   // f/r = (kappa + 1/r) * (a * exp(-kappa*r) / r^2)
-  const F_FLOAT rinv = 1.0 / rr;
-  const F_FLOAT rinv2 = rinv*rinv;
-  const F_FLOAT screening = exp(-kappa*rr);
-  const F_FLOAT forceyukawa = aa * screening * (kappa + rinv);
-  const F_FLOAT fpair = forceyukawa * rinv2;
+  const KK_FLOAT rinv = 1.0 / rr;
+  const KK_FLOAT rinv2 = rinv*rinv;
+  const KK_FLOAT screening = exp(-kappa*rr);
+  const KK_FLOAT forceyukawa = aa * screening * (kappa + rinv);
+  const KK_FLOAT fpair = forceyukawa * rinv2;
 
   return fpair;
 }
@@ -267,23 +238,21 @@ compute_fpair(const F_FLOAT& rsq, const int& i, const int&j,
 template<class DeviceType>
 template<bool STACKPARAMS, class Specialisation>
 KOKKOS_INLINE_FUNCTION
-F_FLOAT PairYukawaKokkos<DeviceType>::
-compute_evdwl(const F_FLOAT& rsq, const int& i, const int&j,
-              const int& itype, const int& jtype) const {
-  (void) i;
-  (void) j;
-  const F_FLOAT rr     = sqrt(rsq);
-  const F_FLOAT aa     = STACKPARAMS ? m_params[itype][jtype].a
+KK_FLOAT PairYukawaKokkos<DeviceType>::
+compute_evdwl(const KK_FLOAT &rsq, const int &, const int &,
+              const int &itype, const int &jtype) const {
+  const KK_FLOAT rr     = sqrt(rsq);
+  const KK_FLOAT aa     = STACKPARAMS ? m_params[itype][jtype].a
                                      : params(itype,jtype).a;
-  const F_FLOAT offset = STACKPARAMS ? m_params[itype][jtype].offset
+  const KK_FLOAT offset = STACKPARAMS ? m_params[itype][jtype].offset
                                      : params(itype,jtype).offset;
 
   // U   = a * exp(-kappa*r) / r
   // f   = (kappa * a * exp(-kappa*r) / r + a*exp(-kappa*r)/r^2)*grad(r)
   //     = (kappa + 1/r) * (a * exp(-kappa*r) / r)
   // f/r = (kappa + 1/r) * (a * exp(-kappa*r) / r^2)
-  const F_FLOAT rinv = 1.0 / rr;
-  const F_FLOAT screening = exp(-kappa*rr);
+  const KK_FLOAT rinv = 1.0 / rr;
+  const KK_FLOAT screening = exp(-kappa*rr);
 
   return aa * screening * rinv - offset;
 }

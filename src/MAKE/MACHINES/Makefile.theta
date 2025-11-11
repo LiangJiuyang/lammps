@@ -11,7 +11,7 @@ CC =        CC -mkl
 OPTFLAGS =  -xMIC-AVX512 -O3 -fp-model fast=2 -no-prec-div -qoverride-limits
 CCFLAGS =   -g -qopenmp -qno-offload -ansi-alias -restrict \
             -DLMP_INTEL_USELRT -DLMP_USE_MKL_RNG $(OPTFLAGS)
-CCFLAGS +=  -std=c++11
+CCFLAGS +=  -std=c++17
 SHFLAGS =   -fPIC
 DEPFLAGS =  -M
 
@@ -70,6 +70,11 @@ JPG_INC =
 JPG_PATH =
 JPG_LIB =
 
+#  library for loading shared objects (defaults to -ldl, should be empty on Windows)
+# uncomment to change the default
+
+# override DYN_LIB =
+
 # ---------------------------------------------------------------------
 # build rules and dependencies
 # do not edit this section
@@ -79,7 +84,7 @@ include Makefile.package
 
 EXTRA_INC = $(LMP_INC) $(PKG_INC) $(MPI_INC) $(FFT_INC) $(JPG_INC) $(PKG_SYSINC)
 EXTRA_PATH = $(PKG_PATH) $(MPI_PATH) $(FFT_PATH) $(JPG_PATH) $(PKG_SYSPATH)
-EXTRA_LIB = $(PKG_LIB) $(MPI_LIB) $(FFT_LIB) $(JPG_LIB) $(PKG_SYSLIB)
+EXTRA_LIB = $(PKG_LIB) $(MPI_LIB) $(FFT_LIB) $(JPG_LIB) $(PKG_SYSLIB) $(DYN_LIB)
 EXTRA_CPP_DEPENDS = $(PKG_CPP_DEPENDS)
 EXTRA_LINK_DEPENDS = $(PKG_LINK_DEPENDS)
 

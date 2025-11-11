@@ -6,7 +6,7 @@ run command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    run N keyword values ...
 
@@ -45,7 +45,7 @@ Description
 
 Run or continue dynamics for a specified number of timesteps.
 
-When the :doc:`run style <run_style>` is *respa*\ , N refers to outer
+When the :doc:`run style <run_style>` is *respa*, N refers to outer
 loop (largest) timesteps.
 
 A value of N = 0 is acceptable; only the thermodynamics of the system
@@ -64,7 +64,7 @@ completes.
 The *start* or *stop* keywords can be used if multiple runs are being
 performed and you want a :doc:`fix <fix>` command that changes some
 value over time (e.g. temperature) to make the change across the
-entire set of runs and not just a single run.  See the doc page for
+entire set of runs and not just a single run.  See the page for
 individual fixes to see which ones can be used with the *start/stop*
 keywords.
 
@@ -103,14 +103,16 @@ must be done.
 
 .. note::
 
-   If your input script changes the system between 2 runs, then the
-   initial setup must be performed to insure the change is recognized by
-   all parts of the code that are affected.  Examples are adding a
-   :doc:`fix <fix>` or :doc:`dump <dump>` or :doc:`compute <compute>`, changing
-   a :doc:`neighbor <neigh_modify>` list parameter, or writing restart file
-   which can migrate atoms between processors.  LAMMPS has no easy way to
-   check if this has happened, but it is an error to use the *pre no*
-   option in this case.
+   If your input script "changes" the system between 2 runs, then the
+   initial setup typically needs to be performed to ensure the change
+   is recognized by all parts of the code that are affected.  Examples
+   are adding a :doc:`fix <fix>` or :doc:`dump <dump>` or
+   :doc:`compute <compute>`, changing a :doc:`neighbor <neigh_modify>`
+   list parameter, using the :doc:`set <set>` command, or writing a
+   restart file via the :doc:`write_restart <write_restart>` command,
+   which can migrate atoms between processors.  LAMMPS has no easy way
+   to check if this has happened, but it is an error to use the *pre
+   no* option in these cases.
 
 If *post* is specified as "no", the full timing summary is skipped;
 only a one-line summary timing is printed.
@@ -136,7 +138,7 @@ be useful for invoking a command you have added to LAMMPS that wraps
 some other code (e.g. as a library) to perform a computation
 periodically during a long LAMMPS run.  See the :doc:`Modify <Modify>`
 doc page for info about how to add new commands to LAMMPS.  See the
-:doc:`Howto couple <Howto_couple>` doc page for ideas about how to
+:doc:`Howto couple <Howto_couple>` page for ideas about how to
 couple LAMMPS to other codes.
 
 With the *every* option, N total steps are simulated, in shorter runs
@@ -203,7 +205,7 @@ Restrictions
 
 When not using the *upto* keyword, the number of specified timesteps N
 must fit in a signed 32-bit integer, so you are limited to slightly
-more than 2 billion steps (2\^31) in a single run.  When using *upto*\ ,
+more than 2 billion steps (2\^31) in a single run.  When using *upto*,
 N can be larger than a signed 32-bit integer, however the difference
 between N and the current timestep must still be no larger than
 2\^31 steps.

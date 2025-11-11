@@ -7,9 +7,11 @@
 // If you wish to distribute your changes, please submit them to the
 // Colvars repository at GitHub.
 
-#include <cstdlib>
+#include <iostream>
+#include <iomanip>
 
 #include "colvarmodule.h"
+#include "colvarproxy.h"
 #include "colvarbias.h"
 #include "colvarbias_alb.h"
 
@@ -36,7 +38,13 @@ colvarbias_alb::colvarbias_alb(char const *key)
 
 int colvarbias_alb::init(std::string const &conf)
 {
-  colvarbias::init(conf);
+  colvarproxy *proxy = cvm::main()->proxy;
+  int error_code = colvarbias::init(conf);
+  if (error_code != COLVARS_OK) {
+    return error_code;
+  }
+
+  cvm::main()->cite_feature("ALB colvar bias implementation");
 
   enable(f_cvb_scalar_variables);
 
@@ -73,21 +81,34 @@ int colvarbias_alb::init(std::string const &conf)
     }
   } else {
     colvar_centers.clear();
-    cvm::fatal_error("Error: must define the initial centers of adaptive linear bias .\n");
+    error_code |= cvm::error("Error: must define the initial centers of adaptive linear bias.\n",
+                             COLVARS_INPUT_ERROR);
   }
 
-  if (colvar_centers.size() != num_variables())
-    cvm::fatal_error("Error: number of centers does not match "
-                      "that of collective variables.\n");
+  if (colvar_centers.size() != num_variables()) {
+    error_code |=
+        cvm::error("Error: number of centers does not match that of collective variables.\n");
+  }
 
-  if (!get_keyval(conf, "UpdateFrequency", update_freq, 0))
-    cvm::fatal_error("Error: must set updateFrequency for adaptive linear bias.\n");
+  if (!get_keyval(conf, "updateFrequency", update_freq, 0)) {
+    error_code |= cvm::error("Error: must set updateFrequency for adaptive linear bias.\n",
+                             COLVARS_INPUT_ERROR);
+  }
+
+  if (update_freq % time_step_factor != 0) {
+    error_code |= cvm::error("updateFrequency (currently " + cvm::to_str(update_freq) +
+                                 ") must be a multiple of timeStepFactor (" +
+                                 cvm::to_str(time_step_factor) + ").\n",
+                             COLVARS_INPUT_ERROR);
+  }
 
   //we split the time between updating and equilibrating
   update_freq /= 2;
 
-  if (update_freq <= 1)
-    cvm::fatal_error("Error: must set updateFrequency to greater than 2.\n");
+  if (update_freq <= 1) {
+    error_code |=
+        cvm::error("Error: must set updateFrequency to greater than 2.\n", COLVARS_INPUT_ERROR);
+  }
 
   enable(f_cvb_history_dependent);
 
@@ -109,10 +130,12 @@ int colvarbias_alb::init(std::string const &conf)
   if (!get_keyval(conf, "forceRange", max_coupling_range, max_coupling_range)) {
     //set to default
     for (i = 0; i < num_variables(); i++) {
-      if (cvm::temperature() > 0)
-        max_coupling_range[i] =   3 * cvm::temperature() * cvm::boltzmann();
-      else
-        max_coupling_range[i] =   3 * cvm::boltzmann();
+      if (proxy->target_temperature() > 0.0) {
+        max_coupling_range[i] = 3 * proxy->target_temperature() *
+          proxy->boltzmann();
+      } else {
+        max_coupling_range[i] = 3 * proxy->boltzmann();
+      }
     }
   }
 
@@ -127,7 +150,7 @@ int colvarbias_alb::init(std::string const &conf)
   if (cvm::debug())
     cvm::log(" bias.\n");
 
-  return COLVARS_OK;
+  return error_code;
 }
 
 
@@ -138,9 +161,10 @@ colvarbias_alb::~colvarbias_alb()
 
 int colvarbias_alb::update()
 {
+  colvarproxy *proxy = cvm::main()->proxy;
 
   bias_energy = 0.0;
-  update_calls++;
+  update_calls += time_step_factor;
 
   if (cvm::debug())
     cvm::log("Updating the adaptive linear bias \""+this->name+"\".\n");
@@ -211,12 +235,13 @@ int colvarbias_alb::update()
     //reset means and sum of squares of differences
     for (size_t i = 0; i < num_variables(); i++) {
 
-      temp = 2. * (means[i] / (static_cast<cvm::real> (colvar_centers[i])) - 1) * ssd[i] / (update_calls - 1);
+      temp = 2. * (means[i] / (static_cast<cvm::real> (colvar_centers[i])) - 1) * ssd[i] / (update_calls - time_step_factor);
 
-      if (cvm::temperature() > 0)
-        step_size = temp / (cvm::temperature()  * cvm::boltzmann());
-      else
-        step_size = temp / cvm::boltzmann();
+      if (proxy->target_temperature() > 0.0) {
+        step_size = temp / (proxy->target_temperature() * proxy->boltzmann());
+      } else {
+        step_size = temp / proxy->boltzmann();
+      }
 
       means[i] = 0;
       ssd[i] = 0;
@@ -253,31 +278,31 @@ int colvarbias_alb::set_state_params(std::string const &conf)
   }
 
   if (!get_keyval(conf, "setCoupling", set_coupling))
-    cvm::fatal_error("Error: current setCoupling  is missing from the restart.\n");
+    cvm::error("Error: current setCoupling  is missing from the restart.\n");
 
   if (!get_keyval(conf, "currentCoupling", current_coupling))
-    cvm::fatal_error("Error: current setCoupling  is missing from the restart.\n");
+    cvm::error("Error: current setCoupling  is missing from the restart.\n");
 
   if (!get_keyval(conf, "maxCouplingRange", max_coupling_range))
-    cvm::fatal_error("Error: maxCouplingRange  is missing from the restart.\n");
+    cvm::error("Error: maxCouplingRange  is missing from the restart.\n");
 
   if (!get_keyval(conf, "couplingRate", coupling_rate))
-    cvm::fatal_error("Error: current setCoupling  is missing from the restart.\n");
+    cvm::error("Error: current setCoupling  is missing from the restart.\n");
 
   if (!get_keyval(conf, "couplingAccum", coupling_accum))
-    cvm::fatal_error("Error: couplingAccum is missing from the restart.\n");
+    cvm::error("Error: couplingAccum is missing from the restart.\n");
 
   if (!get_keyval(conf, "mean", means))
-    cvm::fatal_error("Error: current mean is missing from the restart.\n");
+    cvm::error("Error: current mean is missing from the restart.\n");
 
   if (!get_keyval(conf, "ssd", ssd))
-    cvm::fatal_error("Error: current ssd is missing from the restart.\n");
+    cvm::error("Error: current ssd is missing from the restart.\n");
 
   if (!get_keyval(conf, "updateCalls", update_calls))
-    cvm::fatal_error("Error: current updateCalls is missing from the restart.\n");
+    cvm::error("Error: current updateCalls is missing from the restart.\n");
 
   if (!get_keyval(conf, "b_equilibration", b_equilibration))
-    cvm::fatal_error("Error: current updateCalls is missing from the restart.\n");
+    cvm::error("Error: current updateCalls is missing from the restart.\n");
 
   return COLVARS_OK;
 }

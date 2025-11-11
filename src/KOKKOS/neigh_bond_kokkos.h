@@ -1,7 +1,8 @@
+// clang-format off
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -14,10 +15,9 @@
 #ifndef LMP_NEIGH_BOND_KOKKOS_H
 #define LMP_NEIGH_BOND_KOKKOS_H
 
-#include "neighbor.h"
 #include "kokkos_type.h"
-#include "domain_kokkos.h"
 #include "pointers.h"
+#include <Kokkos_UnorderedMap.hpp>
 
 namespace LAMMPS_NS {
 
@@ -36,11 +36,12 @@ struct TagNeighBondImproperPartial{};
 template<class DeviceType>
 class NeighBondKokkos : protected Pointers  {
  public:
+  typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   typedef int value_type;
 
   NeighBondKokkos(class LAMMPS *);
-  ~NeighBondKokkos() {}
+  ~NeighBondKokkos() override = default;
   void init_topology_kk();
   void build_topology_kk();
 
@@ -67,10 +68,10 @@ class NeighBondKokkos : protected Pointers  {
   KOKKOS_INLINE_FUNCTION
   void operator()(TagNeighBondImproperPartial, const int&, int&) const;
 
-  DAT::tdual_int_2d k_bondlist;
-  DAT::tdual_int_2d k_anglelist;
-  DAT::tdual_int_2d k_dihedrallist;
-  DAT::tdual_int_2d k_improperlist;
+  DAT::tdual_int_2d_lr k_bondlist;
+  DAT::tdual_int_2d_lr k_anglelist;
+  DAT::tdual_int_2d_lr k_dihedrallist;
+  DAT::tdual_int_2d_lr k_improperlist;
 
   // KOKKOS host/device flag and data masks
   ExecutionSpace execution_space;
@@ -80,21 +81,19 @@ class NeighBondKokkos : protected Pointers  {
   int me,nprocs;
 
  private:
-
-
-  DAT::tdual_int_1d k_map_array;
-  typename AT::t_int_1d_randomread map_array;
-
+  int map_style;
   DAT::tdual_int_1d k_sametag;
-  typename AT::t_int_1d_randomread sametag;
+  typename AT::t_int_1d d_sametag;
+  DAT::tdual_int_1d k_map_array;
+  dual_hash_type k_map_hash;
 
-  typename AT::t_int_2d v_bondlist;
-  typename AT::t_int_2d v_anglelist;
-  typename AT::t_int_2d v_dihedrallist;
-  typename AT::t_int_2d v_improperlist;
-  typename AT::t_int_2d list;
+  typename AT::t_int_2d_lr v_bondlist;
+  typename AT::t_int_2d_lr v_anglelist;
+  typename AT::t_int_2d_lr v_dihedrallist;
+  typename AT::t_int_2d_lr v_improperlist;
+  typename AT::t_int_2d_lr list;
 
-  typename AT::t_x_array_randomread x;
+  typename AT::t_kkfloat_1d_3_lr_randomread x;
   typename AT::t_tagint_1d_randomread tag;
 
   typename AT::t_int_1d num_bond;
@@ -115,11 +114,10 @@ class NeighBondKokkos : protected Pointers  {
   typename AT::t_tagint_2d improper_atom1,improper_atom2,
     improper_atom3,improper_atom4;
 
-  DAT::tdual_int_scalar k_nlist;
+  typename AT::t_int_1d d_scalars;
+  HAT::t_int_1d h_scalars;
   typename AT::t_int_scalar d_nlist;
   HAT::t_int_scalar h_nlist;
-
-  DAT::tdual_int_scalar k_fail_flag;
   typename AT::t_int_scalar d_fail_flag;
   HAT::t_int_scalar h_fail_flag;
 
@@ -127,13 +125,13 @@ class NeighBondKokkos : protected Pointers  {
   int closest_image(const int, int) const;
 
   KOKKOS_INLINE_FUNCTION
-  void minimum_image(X_FLOAT &dx, X_FLOAT &dy, X_FLOAT &dz) const;
+  void minimum_image(double &dx, double &dy, double &dz) const;
 
-  void update_domain_variables();
+  void update_class_variables();
 
   // topology build functions
 
-  typedef void (NeighBondKokkos::*BondPtr)();   // ptrs to topology build functions
+  using BondPtr = void (NeighBondKokkos::*)();   // ptrs to topology build functions
 
   BondPtr bond_build_kk;                 // ptr to bond list functions
   void bond_all();                    // bond list with all bonds
@@ -151,7 +149,7 @@ class NeighBondKokkos : protected Pointers  {
   void dihedral_all();                // dihedral list with all dihedrals
   void dihedral_template();           // dihedral list with templated bonds
   void dihedral_partial();            // exclude certain dihedrals
-  void dihedral_check(int, typename AT::t_int_2d list);
+  void dihedral_check(int, typename AT::t_int_2d_lr list);
 
   BondPtr improper_build_kk;             // ptr to improper list functions
   void improper_all();                // improper list with all impropers
@@ -162,95 +160,12 @@ class NeighBondKokkos : protected Pointers  {
 
   int triclinic;
   int xperiodic,yperiodic,zperiodic;
-  X_FLOAT xprd_half,yprd_half,zprd_half;
-  X_FLOAT xprd,yprd,zprd;
-  X_FLOAT xy,xz,yz;
+  double xprd_half,yprd_half,zprd_half;
+  double xprd,yprd,zprd;
+  double xy,xz,yz;
 };
 
 }
 
 #endif
 
-/* ERROR/WARNING messages:
-
-E: Must use atom map style array with Kokkos
-
-See the atom_modify map command.
-
-E: Bond atoms missing on proc %d at step %ld
-
-The 2nd atom needed to compute a particular bond is missing on this
-processor.  Typically this is because the pairwise cutoff is set too
-short or the bond has blown apart and an atom is too far away.
-
-W: Bond atoms missing at step %ld
-
-The 2nd atom needed to compute a particular bond is missing on this
-processor.  Typically this is because the pairwise cutoff is set too
-short or the bond has blown apart and an atom is too far away.
-
-E: Cannot (yet) use molecular templates with Kokkos
-
-Self-explanatory.
-
-E: Bond extent > half of periodic box length
-
-This error was detected by the neigh_modify check yes setting.  It is
-an error because the bond atoms are so far apart it is ambiguous how
-it should be defined.
-
-E: Angle atoms missing on proc %d at step %ld
-
-One or more of 3 atoms needed to compute a particular angle are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the angle has blown apart and an atom is
-too far away.
-
-W: Angle atoms missing at step %ld
-
-One or more of 3 atoms needed to compute a particular angle are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the angle has blown apart and an atom is
-too far away.
-
-E: Angle extent > half of periodic box length
-
-This error was detected by the neigh_modify check yes setting.  It is
-an error because the angle atoms are so far apart it is ambiguous how
-it should be defined.
-
-E: Dihedral atoms missing on proc %d at step %ld
-
-One or more of 4 atoms needed to compute a particular dihedral are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the dihedral has blown apart and an atom is
-too far away.
-
-W: Dihedral atoms missing at step %ld
-
-One or more of 4 atoms needed to compute a particular dihedral are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the dihedral has blown apart and an atom is
-too far away.
-
-E: Dihedral/improper extent > half of periodic box length
-
-This error was detected by the neigh_modify check yes setting.  It is
-an error because the dihedral atoms are so far apart it is ambiguous
-how it should be defined.
-
-E: Improper atoms missing on proc %d at step %ld
-
-One or more of 4 atoms needed to compute a particular improper are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the improper has blown apart and an atom is
-too far away.
-
-W: Improper atoms missing at step %ld
-
-One or more of 4 atoms needed to compute a particular improper are
-missing on this processor.  Typically this is because the pairwise
-cutoff is set too short or the improper has blown apart and an atom is
-too far away.
-
-*/

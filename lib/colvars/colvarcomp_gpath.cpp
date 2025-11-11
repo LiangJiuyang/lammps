@@ -1,4 +1,4 @@
-#if (__cplusplus >= 201103L)
+// -*- c++ -*-
 
 // This file is part of the Collective Variables module (Colvars).
 // The original version of Colvars and its updates are located at:
@@ -10,21 +10,29 @@
 #include <numeric>
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <limits>
+#include <fstream>
 
 #include "colvarmodule.h"
 #include "colvarvalue.h"
-#include "colvarparse.h"
 #include "colvar.h"
 #include "colvarcomp.h"
 
-bool compareColvarComponent(colvar::cvc *i, colvar::cvc *j)
+
+
+colvar::CartesianBasedPath::CartesianBasedPath()
 {
-    return i->name < j->name;
+    x.type(colvarvalue::type_scalar);
+    // Don't use implicit gradient
+    enable(f_cvc_explicit_gradient);
 }
 
-colvar::CartesianBasedPath::CartesianBasedPath(std::string const &conf): cvc(conf), atoms(nullptr), reference_frames(0) {
+
+int colvar::CartesianBasedPath::init(std::string const &conf)
+{
+    int error_code = cvc::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     // Parse selected atoms
     atoms = parse_group(conf, "atoms");
     has_user_defined_fitting = false;
@@ -35,13 +43,12 @@ colvar::CartesianBasedPath::CartesianBasedPath(std::string const &conf): cvc(con
     // Lookup reference column of PDB
     // Copied from the RMSD class
     std::string reference_column;
-    double reference_column_value;
+    double reference_column_value = 0.0;
     if (get_keyval(conf, "refPositionsCol", reference_column, std::string(""))) {
-        bool found = get_keyval(conf, "refPositionsColValue", reference_column_value, 0.0);
+        bool found = get_keyval(conf, "refPositionsColValue", reference_column_value, reference_column_value);
         if (found && reference_column_value == 0.0) {
-          cvm::error("Error: refPositionsColValue, "
-                     "if provided, must be non-zero.\n");
-          return;
+            return cvm::error("Error: refPositionsColValue, if provided, must be non-zero.\n",
+                              COLVARS_INPUT_ERROR);
         }
     }
     // Lookup all reference frames
@@ -62,50 +69,43 @@ colvar::CartesianBasedPath::CartesianBasedPath(std::string const &conf): cvc(con
     }
     // Setup alignment to compute RMSD with respect to reference frames
     for (size_t i_frame = 0; i_frame < reference_frames.size(); ++i_frame) {
-        cvm::atom_group* tmp_atoms = parse_group(conf, "atoms");
+        auto* tmp_atoms = parse_group(conf, "atoms");
         if (!has_user_defined_fitting) {
             // Swipe from the rmsd class
-            tmp_atoms->b_center = true;
-            tmp_atoms->b_rotate = true;
-            tmp_atoms->ref_pos = reference_frames[i_frame];
+            tmp_atoms->enable(f_ag_center);
+            tmp_atoms->enable(f_ag_rotate);
+            tmp_atoms->set_ref_pos_from_aos(reference_frames[i_frame]);
             tmp_atoms->center_ref_pos();
             tmp_atoms->enable(f_ag_fit_gradients);
-            tmp_atoms->rot.request_group1_gradients(tmp_atoms->size());
-            tmp_atoms->rot.request_group2_gradients(tmp_atoms->size());
-            comp_atoms.push_back(tmp_atoms);
         } else {
             // parse a group of atoms for fitting
             std::string fitting_group_name = std::string("fittingAtoms") + cvm::to_str(i_frame);
             cvm::atom_group* tmp_fitting_atoms = new cvm::atom_group(fitting_group_name.c_str());
             tmp_fitting_atoms->parse(fitting_conf);
             tmp_fitting_atoms->disable(f_ag_scalable);
-            tmp_fitting_atoms->disable(f_ag_scalable_com);
-            tmp_fitting_atoms->fit_gradients.assign(tmp_fitting_atoms->size(), cvm::atom_pos(0.0, 0.0, 0.0));
+            tmp_fitting_atoms->fit_gradients.assign(3 * tmp_fitting_atoms->size(), 0);
             std::string reference_position_file_lookup = "refPositionsFile" + cvm::to_str(i_frame + 1);
             std::string reference_position_filename;
             get_keyval(conf, reference_position_file_lookup.c_str(), reference_position_filename, std::string(""));
             std::vector<cvm::atom_pos> reference_fitting_position(tmp_fitting_atoms->size());
             cvm::load_coords(reference_position_filename.c_str(), &reference_fitting_position, tmp_fitting_atoms, reference_column, reference_column_value);
             // setup the atom group for calculating
-            tmp_atoms->b_center = true;
-            tmp_atoms->b_rotate = true;
+            tmp_atoms->enable(f_ag_center);
+            tmp_atoms->enable(f_ag_rotate);
             tmp_atoms->b_user_defined_fit = true;
             tmp_atoms->disable(f_ag_scalable);
-            tmp_atoms->disable(f_ag_scalable_com);
-            tmp_atoms->ref_pos = reference_fitting_position;
+            tmp_atoms->set_ref_pos_from_aos(reference_fitting_position);
             tmp_atoms->center_ref_pos();
             tmp_atoms->enable(f_ag_fit_gradients);
             tmp_atoms->enable(f_ag_fitting_group);
             tmp_atoms->fitting_group = tmp_fitting_atoms;
-            tmp_atoms->rot.request_group1_gradients(tmp_fitting_atoms->size());
-            tmp_atoms->rot.request_group2_gradients(tmp_fitting_atoms->size());
             reference_fitting_frames.push_back(reference_fitting_position);
-            comp_atoms.push_back(tmp_atoms);
         }
+        tmp_atoms->setup_rotation_derivative();
+        comp_atoms.push_back(tmp_atoms);
     }
-    x.type(colvarvalue::type_scalar);
-    // Don't use implicit gradient
-    enable(f_cvc_explicit_gradient);
+
+    return error_code;
 }
 
 colvar::CartesianBasedPath::~CartesianBasedPath() {
@@ -115,6 +115,7 @@ colvar::CartesianBasedPath::~CartesianBasedPath() {
             (*it_comp_atoms) = nullptr;
         }
     }
+    // Avoid double-freeing due to CVC-in-CVC construct
     atom_groups.clear();
 }
 
@@ -122,7 +123,11 @@ void colvar::CartesianBasedPath::computeDistanceToReferenceFrames(std::vector<cv
     for (size_t i_frame = 0; i_frame < reference_frames.size(); ++i_frame) {
         cvm::real frame_rmsd = 0.0;
         for (size_t i_atom = 0; i_atom < atoms->size(); ++i_atom) {
-            frame_rmsd += ((*(comp_atoms[i_frame]))[i_atom].pos - reference_frames[i_frame][i_atom]).norm2();
+            const cvm::atom_pos p(
+                comp_atoms[i_frame]->pos_x(i_atom),
+                comp_atoms[i_frame]->pos_y(i_atom),
+                comp_atoms[i_frame]->pos_z(i_atom));
+            frame_rmsd += (p - reference_frames[i_frame][i_atom]).norm2();
         }
         frame_rmsd /= cvm::real(atoms->size());
         frame_rmsd = cvm::sqrt(frame_rmsd);
@@ -130,8 +135,60 @@ void colvar::CartesianBasedPath::computeDistanceToReferenceFrames(std::vector<cv
     }
 }
 
-colvar::gspath::gspath(std::string const &conf): CartesianBasedPath(conf) {
-    function_type = "gspath";
+// mainly used for determining the lambda value for arithmetic path
+void colvar::CartesianBasedPath::computeDistanceBetweenReferenceFrames(std::vector<cvm::real>& result) {
+    for (size_t i_frame = 0; i_frame < reference_frames.size() - 1; ++i_frame) {
+        std::vector<cvm::atom_pos> this_frame_atom_pos(reference_frames[i_frame].size());
+        std::vector<cvm::atom_pos> next_frame_atom_pos(reference_frames[i_frame + 1].size());
+        cvm::real frame_rmsd = 0.0;
+        const size_t this_index = i_frame;
+        const size_t next_index = i_frame + 1;
+        // compute COM of two successive images, respectively
+        cvm::atom_pos reference_cog_this, reference_cog_next;
+        for (size_t i_atom = 0; i_atom < atoms->size(); ++i_atom) {
+            reference_cog_this += reference_frames[this_index][i_atom];
+            reference_cog_next += reference_frames[next_index][i_atom];
+        }
+        reference_cog_this /= reference_frames[this_index].size();
+        reference_cog_next /= reference_frames[next_index].size();
+        // move all atoms to COM
+        for (size_t i_atom = 0; i_atom < atoms->size(); ++i_atom) {
+            this_frame_atom_pos[i_atom] = reference_frames[this_index][i_atom] - reference_cog_this;
+            next_frame_atom_pos[i_atom] = reference_frames[next_index][i_atom] - reference_cog_next;
+        }
+        cvm::rotation rot_this_to_next;
+        // compute the optimal rotation
+        rot_this_to_next.calc_optimal_rotation(this_frame_atom_pos, next_frame_atom_pos);
+        // compute rmsd between reference frames
+        for (size_t i_atom = 0; i_atom < atoms->size(); ++i_atom) {
+            frame_rmsd += (rot_this_to_next.q.rotate(this_frame_atom_pos[i_atom]) - next_frame_atom_pos[i_atom]).norm2();
+        }
+        frame_rmsd /= cvm::real(atoms->size());
+        frame_rmsd = cvm::sqrt(frame_rmsd);
+        result[i_frame] = frame_rmsd;
+    }
+}
+
+
+void colvar::CartesianBasedPath::apply_force(colvarvalue const &force)
+{
+    cvm::error("Error: using apply_force() in a component of type CartesianBasedPath, which is abstract.\n",
+               COLVARS_BUG_ERROR);
+}
+
+
+
+colvar::gspath::gspath()
+{
+    set_function_type("gspath");
+}
+
+
+int colvar::gspath::init(std::string const &conf)
+{
+    int error_code = CartesianBasedPath::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     get_keyval(conf, "useSecondClosestFrame", use_second_closest_frame, true);
     if (use_second_closest_frame == true) {
         cvm::log(std::string("Geometric path s(σ) will use the second closest frame to compute s_(m-1)\n"));
@@ -145,11 +202,14 @@ colvar::gspath::gspath(std::string const &conf): CartesianBasedPath(conf) {
         cvm::log(std::string("Geometric path s(σ) will use the neighbouring frame to compute s_(m+1)\n"));
     }
     if (total_reference_frames < 2) {
-        cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) + " reference frames, but gspath requires at least 2 frames.\n");
+        return cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) +
+                              " reference frames, but gspath requires at least 2 frames.\n",
+                          COLVARS_INPUT_ERROR);
     }
     GeometricPathCV::GeometricPathBase<cvm::atom_pos, cvm::real, GeometricPathCV::path_sz::S>::initialize(atoms->size(), cvm::atom_pos(), total_reference_frames, use_second_closest_frame, use_third_closest_frame);
     cvm::log(std::string("Geometric pathCV(s) is initialized.\n"));
     cvm::log(std::string("Geometric pathCV(s) loaded ") + cvm::to_str(reference_frames.size()) + std::string(" frames.\n"));
+    return error_code;
 }
 
 void colvar::gspath::updateDistanceToReferenceFrames() {
@@ -159,10 +219,14 @@ void colvar::gspath::updateDistanceToReferenceFrames() {
 void colvar::gspath::prepareVectors() {
     size_t i_atom;
     for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
-        // v1 = s_m - z
-        v1[i_atom] = reference_frames[min_frame_index_1][i_atom] - (*(comp_atoms[min_frame_index_1]))[i_atom].pos;
-        // v2 = z - s_(m-1)
-        v2[i_atom] = (*(comp_atoms[min_frame_index_2]))[i_atom].pos - reference_frames[min_frame_index_2][i_atom];
+        const cvm::atom_pos p1(comp_atoms[min_frame_index_1]->pos_x(i_atom),
+                               comp_atoms[min_frame_index_1]->pos_y(i_atom),
+                               comp_atoms[min_frame_index_1]->pos_z(i_atom));
+        v1[i_atom] = reference_frames[min_frame_index_1][i_atom] - p1;
+        const cvm::atom_pos p2(comp_atoms[min_frame_index_2]->pos_x(i_atom),
+                               comp_atoms[min_frame_index_2]->pos_y(i_atom),
+                               comp_atoms[min_frame_index_2]->pos_z(i_atom));
+        v2[i_atom] = p2 - reference_frames[min_frame_index_2][i_atom];
     }
     if (min_frame_index_3 < 0 || min_frame_index_3 > M) {
         cvm::atom_pos reference_cog_1, reference_cog_2;
@@ -170,8 +234,8 @@ void colvar::gspath::prepareVectors() {
             reference_cog_1 += reference_frames[min_frame_index_1][i_atom];
             reference_cog_2 += reference_frames[min_frame_index_2][i_atom];
         }
-        reference_cog_1 /= reference_frames[min_frame_index_1].size();
-        reference_cog_2 /= reference_frames[min_frame_index_2].size();
+        reference_cog_1 /= cvm::real(reference_frames[min_frame_index_1].size());
+        reference_cog_2 /= cvm::real(reference_frames[min_frame_index_2].size());
         std::vector<cvm::atom_pos> tmp_reference_frame_1(reference_frames[min_frame_index_1].size());
         std::vector<cvm::atom_pos> tmp_reference_frame_2(reference_frames[min_frame_index_2].size());
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
@@ -184,8 +248,8 @@ void colvar::gspath::prepareVectors() {
                 reference_fitting_cog_1 += reference_fitting_frames[min_frame_index_1][i_atom];
                 reference_fitting_cog_2 += reference_fitting_frames[min_frame_index_2][i_atom];
             }
-            reference_fitting_cog_1 /= reference_fitting_frames[min_frame_index_1].size();
-            reference_fitting_cog_2 /= reference_fitting_frames[min_frame_index_2].size();
+            reference_fitting_cog_1 /= cvm::real(reference_fitting_frames[min_frame_index_1].size());
+            reference_fitting_cog_2 /= cvm::real(reference_fitting_frames[min_frame_index_2].size());
             std::vector<cvm::atom_pos> tmp_reference_fitting_frame_1(reference_fitting_frames[min_frame_index_1].size());
             std::vector<cvm::atom_pos> tmp_reference_fitting_frame_2(reference_fitting_frames[min_frame_index_2].size());
             for (i_atom = 0; i_atom < reference_fitting_frames[min_frame_index_1].size(); ++i_atom) {
@@ -196,8 +260,9 @@ void colvar::gspath::prepareVectors() {
         } else {
             rot_v3.calc_optimal_rotation(tmp_reference_frame_1, tmp_reference_frame_2);
         }
+        const auto rot_mat_v3 = rot_v3.matrix();
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
-            v3[i_atom] = rot_v3.q.rotate(tmp_reference_frame_1[i_atom]) - tmp_reference_frame_2[i_atom];
+            v3[i_atom] = rot_mat_v3 * tmp_reference_frame_1[i_atom] - tmp_reference_frame_2[i_atom];
         }
     } else {
         cvm::atom_pos reference_cog_1, reference_cog_3;
@@ -205,8 +270,8 @@ void colvar::gspath::prepareVectors() {
             reference_cog_1 += reference_frames[min_frame_index_1][i_atom];
             reference_cog_3 += reference_frames[min_frame_index_3][i_atom];
         }
-        reference_cog_1 /= reference_frames[min_frame_index_1].size();
-        reference_cog_3 /= reference_frames[min_frame_index_3].size();
+        reference_cog_1 /= cvm::real(reference_frames[min_frame_index_1].size());
+        reference_cog_3 /= cvm::real(reference_frames[min_frame_index_3].size());
         std::vector<cvm::atom_pos> tmp_reference_frame_1(reference_frames[min_frame_index_1].size());
         std::vector<cvm::atom_pos> tmp_reference_frame_3(reference_frames[min_frame_index_3].size());
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
@@ -219,8 +284,8 @@ void colvar::gspath::prepareVectors() {
                 reference_fitting_cog_1 += reference_fitting_frames[min_frame_index_1][i_atom];
                 reference_fitting_cog_3 += reference_fitting_frames[min_frame_index_3][i_atom];
             }
-            reference_fitting_cog_1 /= reference_fitting_frames[min_frame_index_1].size();
-            reference_fitting_cog_3 /= reference_fitting_frames[min_frame_index_3].size();
+            reference_fitting_cog_1 /= cvm::real(reference_fitting_frames[min_frame_index_1].size());
+            reference_fitting_cog_3 /= cvm::real(reference_fitting_frames[min_frame_index_3].size());
             std::vector<cvm::atom_pos> tmp_reference_fitting_frame_1(reference_fitting_frames[min_frame_index_1].size());
             std::vector<cvm::atom_pos> tmp_reference_fitting_frame_3(reference_fitting_frames[min_frame_index_3].size());
             for (i_atom = 0; i_atom < reference_fitting_frames[min_frame_index_1].size(); ++i_atom) {
@@ -231,9 +296,10 @@ void colvar::gspath::prepareVectors() {
         } else {
             rot_v3.calc_optimal_rotation(tmp_reference_frame_1, tmp_reference_frame_3);
         }
+        const auto rot_mat_v3 = rot_v3.matrix();
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
             // v3 = s_(m+1) - s_m
-            v3[i_atom] = tmp_reference_frame_3[i_atom] - rot_v3.q.rotate(tmp_reference_frame_1[i_atom]);
+            v3[i_atom] = tmp_reference_frame_3[i_atom] - rot_mat_v3 * tmp_reference_frame_1[i_atom];
         }
     }
 }
@@ -259,8 +325,12 @@ void colvar::gspath::calc_gradients() {
         tmp_atom_grad_v2[0] = sign * 0.5 * dfdv2[i_atom][0] / M;
         tmp_atom_grad_v2[1] = sign * 0.5 * dfdv2[i_atom][1] / M;
         tmp_atom_grad_v2[2] = sign * 0.5 * dfdv2[i_atom][2] / M;
-        (*(comp_atoms[min_frame_index_1]))[i_atom].grad += tmp_atom_grad_v1;
-        (*(comp_atoms[min_frame_index_2]))[i_atom].grad += tmp_atom_grad_v2;
+        comp_atoms[min_frame_index_1]->grad_x(i_atom) += tmp_atom_grad_v1.x;
+        comp_atoms[min_frame_index_1]->grad_y(i_atom) += tmp_atom_grad_v1.y;
+        comp_atoms[min_frame_index_1]->grad_z(i_atom) += tmp_atom_grad_v1.z;
+        comp_atoms[min_frame_index_2]->grad_x(i_atom) += tmp_atom_grad_v2.x;
+        comp_atoms[min_frame_index_2]->grad_y(i_atom) += tmp_atom_grad_v2.y;
+        comp_atoms[min_frame_index_2]->grad_z(i_atom) += tmp_atom_grad_v2.z;
     }
 }
 
@@ -271,8 +341,17 @@ void colvar::gspath::apply_force(colvarvalue const &force) {
     (*(comp_atoms[min_frame_index_2])).apply_colvar_force(F);
 }
 
-colvar::gzpath::gzpath(std::string const &conf): CartesianBasedPath(conf) {
-    function_type = "gzpath";
+
+colvar::gzpath::gzpath()
+{
+    set_function_type("gzpath");
+}
+
+int colvar::gzpath::init(std::string const &conf)
+{
+    int error_code = CartesianBasedPath::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     get_keyval(conf, "useSecondClosestFrame", use_second_closest_frame, true);
     if (use_second_closest_frame == true) {
         cvm::log(std::string("Geometric path z(σ) will use the second closest frame to compute s_(m-1)\n"));
@@ -291,12 +370,15 @@ colvar::gzpath::gzpath(std::string const &conf): CartesianBasedPath(conf) {
         cvm::log(std::string("Geometric path z(σ) will use the square of distance from current frame to path compute z\n"));
     }
     if (total_reference_frames < 2) {
-        cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) + " reference frames, but gzpath requires at least 2 frames.\n");
+        return cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) +
+                               " reference frames, but gzpath requires at least 2 frames.\n",
+                          COLVARS_INPUT_ERROR);
     }
     GeometricPathCV::GeometricPathBase<cvm::atom_pos, cvm::real, GeometricPathCV::path_sz::Z>::initialize(atoms->size(), cvm::atom_pos(), total_reference_frames, use_second_closest_frame, use_third_closest_frame, b_use_z_square);
     // Logging
     cvm::log(std::string("Geometric pathCV(z) is initialized.\n"));
     cvm::log(std::string("Geometric pathCV(z) loaded ") + cvm::to_str(reference_frames.size()) + std::string(" frames.\n"));
+    return error_code;
 }
 
 void colvar::gzpath::updateDistanceToReferenceFrames() {
@@ -310,8 +392,8 @@ void colvar::gzpath::prepareVectors() {
         reference_cog_1 += reference_frames[min_frame_index_1][i_atom];
         reference_cog_2 += reference_frames[min_frame_index_2][i_atom];
     }
-    reference_cog_1 /= reference_frames[min_frame_index_1].size();
-    reference_cog_2 /= reference_frames[min_frame_index_2].size();
+    reference_cog_1 /= cvm::real(reference_frames[min_frame_index_1].size());
+    reference_cog_2 /= cvm::real(reference_frames[min_frame_index_2].size());
     std::vector<cvm::atom_pos> tmp_reference_frame_1(reference_frames[min_frame_index_1].size());
     std::vector<cvm::atom_pos> tmp_reference_frame_2(reference_frames[min_frame_index_2].size());
     for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
@@ -326,8 +408,8 @@ void colvar::gzpath::prepareVectors() {
             reference_fitting_cog_1 += reference_fitting_frames[min_frame_index_1][i_atom];
             reference_fitting_cog_2 += reference_fitting_frames[min_frame_index_2][i_atom];
         }
-        reference_fitting_cog_1 /= reference_fitting_frames[min_frame_index_1].size();
-        reference_fitting_cog_2 /= reference_fitting_frames[min_frame_index_2].size();
+        reference_fitting_cog_1 /= cvm::real(reference_fitting_frames[min_frame_index_1].size());
+        reference_fitting_cog_2 /= cvm::real(reference_fitting_frames[min_frame_index_2].size());
         tmp_reference_fitting_frame_1.resize(reference_fitting_frames[min_frame_index_1].size());
         tmp_reference_fitting_frame_2.resize(reference_fitting_frames[min_frame_index_2].size());
         for (i_atom = 0; i_atom < reference_fitting_frames[min_frame_index_1].size(); ++i_atom) {
@@ -338,12 +420,19 @@ void colvar::gzpath::prepareVectors() {
     } else {
         rot_v4.calc_optimal_rotation(tmp_reference_frame_1, tmp_reference_frame_2);
     }
+    const auto rot_mat_v4 = rot_v4.matrix();
     for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
-        v1[i_atom] = reference_frames[min_frame_index_1][i_atom] - (*(comp_atoms[min_frame_index_1]))[i_atom].pos;
-        v2[i_atom] = (*(comp_atoms[min_frame_index_2]))[i_atom].pos - reference_frames[min_frame_index_2][i_atom];
+        const cvm::atom_pos p1(comp_atoms[min_frame_index_1]->pos_x(i_atom),
+                               comp_atoms[min_frame_index_1]->pos_y(i_atom),
+                               comp_atoms[min_frame_index_1]->pos_z(i_atom));
+        const cvm::atom_pos p2(comp_atoms[min_frame_index_2]->pos_x(i_atom),
+                               comp_atoms[min_frame_index_2]->pos_y(i_atom),
+                               comp_atoms[min_frame_index_2]->pos_z(i_atom));
+        v1[i_atom] = reference_frames[min_frame_index_1][i_atom] - p1;
+        v2[i_atom] = p2 - reference_frames[min_frame_index_2][i_atom];
         // v4 only computes in gzpath
         // v4 = s_m - s_(m-1)
-        v4[i_atom] = rot_v4.q.rotate(tmp_reference_frame_1[i_atom]) - tmp_reference_frame_2[i_atom];
+        v4[i_atom] = rot_mat_v4 * tmp_reference_frame_1[i_atom] - tmp_reference_frame_2[i_atom];
     }
     if (min_frame_index_3 < 0 || min_frame_index_3 > M) {
         v3 = v4;
@@ -352,7 +441,7 @@ void colvar::gzpath::prepareVectors() {
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
             reference_cog_3 += reference_frames[min_frame_index_3][i_atom];
         }
-        reference_cog_3 /= reference_frames[min_frame_index_3].size();
+        reference_cog_3 /= cvm::real(reference_frames[min_frame_index_3].size());
         std::vector<cvm::atom_pos> tmp_reference_frame_3(reference_frames[min_frame_index_3].size());
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
             tmp_reference_frame_3[i_atom] = reference_frames[min_frame_index_3][i_atom] - reference_cog_3;
@@ -362,7 +451,7 @@ void colvar::gzpath::prepareVectors() {
             for (i_atom = 0; i_atom < reference_fitting_frames[min_frame_index_3].size(); ++i_atom) {
                 reference_fitting_cog_3 += reference_fitting_frames[min_frame_index_3][i_atom];
             }
-            reference_fitting_cog_3 /= reference_fitting_frames[min_frame_index_3].size();
+            reference_fitting_cog_3 /= cvm::real(reference_fitting_frames[min_frame_index_3].size());
             std::vector<cvm::atom_pos> tmp_reference_fitting_frame_3(reference_fitting_frames[min_frame_index_3].size());
             for (i_atom = 0; i_atom < reference_fitting_frames[min_frame_index_3].size(); ++i_atom) {
                 tmp_reference_fitting_frame_3[i_atom] =  reference_fitting_frames[min_frame_index_3][i_atom] - reference_fitting_cog_3;
@@ -371,9 +460,10 @@ void colvar::gzpath::prepareVectors() {
         } else {
             rot_v3.calc_optimal_rotation(tmp_reference_frame_1, tmp_reference_frame_3);
         }
+        const auto rot_mat_v3 = rot_v3.matrix();
         for (i_atom = 0; i_atom < atoms->size(); ++i_atom) {
             // v3 = s_(m+1) - s_m
-            v3[i_atom] = tmp_reference_frame_3[i_atom] - rot_v3.q.rotate(tmp_reference_frame_1[i_atom]);
+            v3[i_atom] = tmp_reference_frame_3[i_atom] - rot_mat_v3 * tmp_reference_frame_1[i_atom];
         }
     }
 }
@@ -389,8 +479,12 @@ void colvar::gzpath::calc_gradients() {
     for (size_t i_atom = 0; i_atom < atoms->size(); ++i_atom) {
         tmp_atom_grad_v1 = -1.0 * dzdv1[i_atom];
         tmp_atom_grad_v2 = dzdv2[i_atom];
-        (*(comp_atoms[min_frame_index_1]))[i_atom].grad += tmp_atom_grad_v1;
-        (*(comp_atoms[min_frame_index_2]))[i_atom].grad += tmp_atom_grad_v2;
+        comp_atoms[min_frame_index_1]->grad_x(i_atom) += tmp_atom_grad_v1.x;
+        comp_atoms[min_frame_index_1]->grad_y(i_atom) += tmp_atom_grad_v1.y;
+        comp_atoms[min_frame_index_1]->grad_z(i_atom) += tmp_atom_grad_v1.z;
+        comp_atoms[min_frame_index_2]->grad_x(i_atom) += tmp_atom_grad_v2.x;
+        comp_atoms[min_frame_index_2]->grad_y(i_atom) += tmp_atom_grad_v2.y;
+        comp_atoms[min_frame_index_2]->grad_z(i_atom) += tmp_atom_grad_v2.z;
     }
 }
 
@@ -401,118 +495,32 @@ void colvar::gzpath::apply_force(colvarvalue const &force) {
     (*(comp_atoms[min_frame_index_2])).apply_colvar_force(F);
 }
 
-colvar::linearCombination::linearCombination(std::string const &conf): cvc(conf) {
+
+colvar::CVBasedPath::CVBasedPath()
+{
+    set_function_type("gspathCV");
+    x.type(colvarvalue::type_scalar);
+}
+
+
+int colvar::CVBasedPath::init(std::string const &conf)
+{
+    int error_code = cvc::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     // Lookup all available sub-cvcs
     for (auto it_cv_map = colvar::get_global_cvc_map().begin(); it_cv_map != colvar::get_global_cvc_map().end(); ++it_cv_map) {
         if (key_lookup(conf, it_cv_map->first.c_str())) {
             std::vector<std::string> sub_cvc_confs;
             get_key_string_multi_value(conf, it_cv_map->first.c_str(), sub_cvc_confs);
             for (auto it_sub_cvc_conf = sub_cvc_confs.begin(); it_sub_cvc_conf != sub_cvc_confs.end(); ++it_sub_cvc_conf) {
-                cv.push_back((it_cv_map->second)(*(it_sub_cvc_conf)));
+                cv.push_back((it_cv_map->second)());
+                cv.back()->init(*(it_sub_cvc_conf));
             }
         }
     }
     // Sort all sub CVs by their names
-    std::sort(cv.begin(), cv.end(), compareColvarComponent);
-    for (auto it_sub_cv = cv.begin(); it_sub_cv != cv.end(); ++it_sub_cv) {
-        for (auto it_atom_group = (*it_sub_cv)->atom_groups.begin(); it_atom_group != (*it_sub_cv)->atom_groups.end(); ++it_atom_group) {
-            register_atom_group(*it_atom_group);
-        }
-    }
-    x.type(cv[0]->value());
-    x.reset();
-    use_explicit_gradients = true;
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        if (!cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
-            use_explicit_gradients = false;
-        }
-    }
-    if (!use_explicit_gradients) {
-        disable(f_cvc_explicit_gradient);
-    }
-}
-
-cvm::real colvar::linearCombination::getPolynomialFactorOfCVGradient(size_t i_cv) const {
-    cvm::real factor_polynomial = 1.0;
-    if (cv[i_cv]->value().type() == colvarvalue::type_scalar) {
-        factor_polynomial = cv[i_cv]->sup_coeff * cv[i_cv]->sup_np * cvm::pow(cv[i_cv]->value().real_value, cv[i_cv]->sup_np - 1);
-    } else {
-        factor_polynomial = cv[i_cv]->sup_coeff;
-    }
-    return factor_polynomial;
-}
-
-colvar::linearCombination::~linearCombination() {
-    for (auto it = cv.begin(); it != cv.end(); ++it) {
-        delete (*it);
-    }
-}
-
-void colvar::linearCombination::calc_value() {
-    x.reset();
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        cv[i_cv]->calc_value();
-        colvarvalue current_cv_value(cv[i_cv]->value());
-        // polynomial combination allowed
-        if (current_cv_value.type() == colvarvalue::type_scalar) {
-            x += cv[i_cv]->sup_coeff * (cvm::pow(current_cv_value.real_value, cv[i_cv]->sup_np));
-        } else {
-            x += cv[i_cv]->sup_coeff * current_cv_value;
-        }
-    }
-}
-
-void colvar::linearCombination::calc_gradients() {
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        cv[i_cv]->calc_gradients();
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)) {
-            cvm::real factor_polynomial = getPolynomialFactorOfCVGradient(i_cv);
-            for (size_t j_elem = 0; j_elem < cv[i_cv]->value().size(); ++j_elem) {
-                for (size_t k_ag = 0 ; k_ag < cv[i_cv]->atom_groups.size(); ++k_ag) {
-                    for (size_t l_atom = 0; l_atom < (cv[i_cv]->atom_groups)[k_ag]->size(); ++l_atom) {
-                        (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad = factor_polynomial * (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad;
-                    }
-                }
-            }
-        }
-    }
-}
-
-void colvar::linearCombination::apply_force(colvarvalue const &force) {
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        // If this CV us explicit gradients, then atomic gradients is already calculated
-        // We can apply the force to atom groups directly
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)
-        ) {
-            for (size_t k_ag = 0 ; k_ag < cv[i_cv]->atom_groups.size(); ++k_ag) {
-                (cv[i_cv]->atom_groups)[k_ag]->apply_colvar_force(force.real_value);
-            }
-        } else {
-            // Compute factors for polynomial combinations
-            cvm::real factor_polynomial = getPolynomialFactorOfCVGradient(i_cv);
-            colvarvalue cv_force = force.real_value * factor_polynomial;
-            cv[i_cv]->apply_force(cv_force);
-        }
-    }
-}
-
-colvar::CVBasedPath::CVBasedPath(std::string const &conf): cvc(conf) {
-    // Lookup all available sub-cvcs
-    for (auto it_cv_map = colvar::get_global_cvc_map().begin(); it_cv_map != colvar::get_global_cvc_map().end(); ++it_cv_map) {
-        if (key_lookup(conf, it_cv_map->first.c_str())) {
-            std::vector<std::string> sub_cvc_confs;
-            get_key_string_multi_value(conf, it_cv_map->first.c_str(), sub_cvc_confs);
-            for (auto it_sub_cvc_conf = sub_cvc_confs.begin(); it_sub_cvc_conf != sub_cvc_confs.end(); ++it_sub_cvc_conf) {
-                cv.push_back((it_cv_map->second)(*(it_sub_cvc_conf)));
-            }
-        }
-    }
-    // Sort all sub CVs by their names
-    std::sort(cv.begin(), cv.end(), compareColvarComponent);
+    std::sort(cv.begin(), cv.end(), colvar::compare_cvc);
     // Register atom groups and determine the colvar type for reference
     std::vector<colvarvalue> tmp_cv;
     for (auto it_sub_cv = cv.begin(); it_sub_cv != cv.end(); ++it_sub_cv) {
@@ -528,9 +536,9 @@ colvar::CVBasedPath::CVBasedPath(std::string const &conf): cvc(conf) {
     std::string path_filename;
     get_keyval(conf, "pathFile", path_filename);
     cvm::log(std::string("Reading path file: ") + path_filename + std::string("\n"));
-    std::ifstream ifs_path(path_filename);
-    if (!ifs_path.is_open()) {
-        cvm::error("Error: failed to open path file.\n");
+    auto &ifs_path = cvm::main()->proxy->input_stream(path_filename);
+    if (!ifs_path) {
+        return COLVARS_INPUT_ERROR;
     }
     std::string line;
     const std::string token(" ");
@@ -551,7 +559,8 @@ colvar::CVBasedPath::CVBasedPath(std::string const &conf): cvc(conf) {
                     cvm::log(cvm::to_str(tmp_cv[i_cv][i - start_index]));
                 }
             } else {
-                cvm::error("Error: incorrect format of path file.\n");
+                error_code = cvm::error("Error: incorrect format of path file.\n", COLVARS_INPUT_ERROR);
+                return error_code;
             }
         }
         if (!fields.empty()) {
@@ -559,10 +568,20 @@ colvar::CVBasedPath::CVBasedPath(std::string const &conf): cvc(conf) {
             ++total_reference_frames;
         }
     }
+    cvm::main()->proxy->close_input_stream(path_filename);
     if (total_reference_frames <= 1) {
-	cvm::error("Error: there is only 1 or 0 reference frame, which doesn't constitute a path.\n");
+      error_code = cvm::error(
+          "Error: there is only 1 or 0 reference frame, which doesn't constitute a path.\n",
+          COLVARS_INPUT_ERROR);
+      return error_code;
     }
-    x.type(colvarvalue::type_scalar);
+    if (cv.size() == 0) {
+      error_code =
+          cvm::error("Error: the CV " + name + " expects one or more nesting components.\n",
+                     COLVARS_INPUT_ERROR);
+      return error_code;
+    }
+
     use_explicit_gradients = true;
     for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
         if (!cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
@@ -572,6 +591,8 @@ colvar::CVBasedPath::CVBasedPath(std::string const &conf): cvc(conf) {
     if (!use_explicit_gradients) {
         disable(f_cvc_explicit_gradient);
     }
+
+    return error_code;
 }
 
 void colvar::CVBasedPath::computeDistanceToReferenceFrames(std::vector<cvm::real>& result) {
@@ -622,14 +643,66 @@ cvm::real colvar::CVBasedPath::getPolynomialFactorOfCVGradient(size_t i_cv) cons
 }
 
 colvar::CVBasedPath::~CVBasedPath() {
+    // Recall the steps we initialize the sub-CVCs:
+    // 1. Lookup all sub-CVCs and then register the atom groups for sub-CVCs
+    //    in their constructors;
+    // 2. Iterate over all sub-CVCs, get the pointers of their atom groups
+    //    groups, and register again in the parent (current) CVC.
+    // That being said, the atom groups become children of the sub-CVCs at
+    // first, and then become children of the parent CVC.
+    // So, to destruct this class (parent CVC class), we need to remove the
+    // dependencies of the atom groups to the parent CVC at first.
+    remove_all_children();
+    // Then we remove the dependencies of the atom groups to the sub-CVCs
+    // in their destructors.
     for (auto it = cv.begin(); it != cv.end(); ++it) {
         delete (*it);
     }
+    // The last step is cleaning up the list of atom groups.
     atom_groups.clear();
 }
 
-colvar::gspathCV::gspathCV(std::string const &conf): CVBasedPath(conf) {
-    function_type = "gspathCV";
+
+void colvar::CVBasedPath::apply_force(colvarvalue const &force)
+{
+    cvm::error("Error: using apply_force() in a component of type CVBasedPath, which is abstract.\n",
+               COLVARS_BUG_ERROR);
+}
+
+
+cvm::real colvar::CVBasedPath::dist2(colvarvalue const &x1, colvarvalue const &x2) const
+{
+  return x1.dist2(x2);
+}
+
+
+colvarvalue colvar::CVBasedPath::dist2_lgrad(colvarvalue const &x1, colvarvalue const &x2) const
+{
+  return x1.dist2_grad(x2);
+}
+
+
+colvarvalue colvar::CVBasedPath::dist2_rgrad(colvarvalue const &x1, colvarvalue const &x2) const
+{
+  return x2.dist2_grad(x1);
+}
+
+
+void colvar::CVBasedPath::wrap(colvarvalue & /* x_unwrapped */) const {}
+
+
+
+colvar::gspathCV::gspathCV()
+{
+    set_function_type("gspathCV");
+    x.type(colvarvalue::type_scalar);
+}
+
+int colvar::gspathCV::init(std::string const &conf)
+{
+    int error_code = CVBasedPath::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     cvm::log(std::string("Total number of frames: ") + cvm::to_str(total_reference_frames) + std::string("\n"));
     // Initialize variables for future calculation
     get_keyval(conf, "useSecondClosestFrame", use_second_closest_frame, true);
@@ -645,20 +718,10 @@ colvar::gspathCV::gspathCV(std::string const &conf): CVBasedPath(conf) {
         cvm::log(std::string("Geometric path s(σ) will use the neighbouring frame to compute s_(m+1)\n"));
     }
     if (total_reference_frames < 2) {
-        cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) + " reference frames, but gspathCV requires at least 2 frames.\n");
+        return cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) + " reference frames, but gspathCV requires at least 2 frames.\n", COLVARS_INPUT_ERROR);
     }
     GeometricPathCV::GeometricPathBase<colvarvalue, cvm::real, GeometricPathCV::path_sz::S>::initialize(cv.size(), ref_cv[0], total_reference_frames, use_second_closest_frame, use_third_closest_frame);
-    x.type(colvarvalue::type_scalar);
-    use_explicit_gradients = true;
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        if (!cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
-            use_explicit_gradients = false;
-        }
-    }
-    if (!use_explicit_gradients) {
-        cvm::log("Geometric path s(σ) will use implicit gradients.\n");
-        disable(f_cvc_explicit_gradient);
-    }
+    return error_code;
 }
 
 colvar::gspathCV::~gspathCV() {}
@@ -710,9 +773,7 @@ void colvar::gspathCV::calc_gradients() {
         // No matter whether the i-th cv uses implicit gradient, compute it first.
         cv[i_cv]->calc_gradients();
         // If the gradient is not implicit, then add the gradients to its atom groups
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)) {
+        if (cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
             // Temporary variables storing gradients
             colvarvalue tmp_cv_grad_v1(cv[i_cv]->value());
             colvarvalue tmp_cv_grad_v2(cv[i_cv]->value());
@@ -729,7 +790,14 @@ void colvar::gspathCV::calc_gradients() {
                     // Loop over all atoms in the k-th atom group
                     for (size_t l_atom = 0; l_atom < (cv[i_cv]->atom_groups)[k_ag]->size(); ++l_atom) {
                         // Chain rule
-                        (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad = factor_polynomial * ((*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad * tmp_cv_grad_v1[j_elem] + (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad * tmp_cv_grad_v2[j_elem]);
+                        cvm::rvector g(
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_x(l_atom),
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_y(l_atom),
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_z(l_atom));
+                        g = factor_polynomial * (g * tmp_cv_grad_v1[j_elem] + g * tmp_cv_grad_v2[j_elem]);
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_x(l_atom) = g.x;
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_y(l_atom) = g.y;
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_z(l_atom) = g.z;
                     }
                 }
             }
@@ -741,10 +809,7 @@ void colvar::gspathCV::apply_force(colvarvalue const &force) {
     for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
         // If this CV us explicit gradients, then atomic gradients is already calculated
         // We can apply the force to atom groups directly
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)
-        ) {
+        if (cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
             for (size_t k_ag = 0 ; k_ag < cv[i_cv]->atom_groups.size(); ++k_ag) {
                 (cv[i_cv]->atom_groups)[k_ag]->apply_colvar_force(force.real_value);
             }
@@ -765,8 +830,16 @@ void colvar::gspathCV::apply_force(colvarvalue const &force) {
     }
 }
 
-colvar::gzpathCV::gzpathCV(std::string const &conf): CVBasedPath(conf) {
-    function_type = "gzpathCV";
+colvar::gzpathCV::gzpathCV()
+{
+    set_function_type("gzpathCV");
+}
+
+int colvar::gzpathCV::init(std::string const &conf) {
+
+    int error_code = CVBasedPath::init(conf);
+    if (error_code != COLVARS_OK) return error_code;
+
     cvm::log(std::string("Total number of frames: ") + cvm::to_str(total_reference_frames) + std::string("\n"));
     // Initialize variables for future calculation
     M = cvm::real(total_reference_frames - 1);
@@ -789,20 +862,13 @@ colvar::gzpathCV::gzpathCV(std::string const &conf): CVBasedPath(conf) {
         cvm::log(std::string("Geometric path z(σ) will use the square of distance from current frame to path compute z\n"));
     }
     if (total_reference_frames < 2) {
-        cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) + " reference frames, but gzpathCV requires at least 2 frames.\n");
+        return cvm::error("Error: you have specified " + cvm::to_str(total_reference_frames) +
+                                     " reference frames, but gzpathCV requires at least 2 frames.\n",
+                                 COLVARS_INPUT_ERROR);
     }
     GeometricPathCV::GeometricPathBase<colvarvalue, cvm::real, GeometricPathCV::path_sz::Z>::initialize(cv.size(), ref_cv[0], total_reference_frames, use_second_closest_frame, use_third_closest_frame, b_use_z_square);
-    x.type(colvarvalue::type_scalar);
-    use_explicit_gradients = true;
-    for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
-        if (!cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
-            use_explicit_gradients = false;
-        }
-    }
-    if (!use_explicit_gradients) {
-        cvm::log("Geometric path z(σ) will use implicit gradients.\n");
-        disable(f_cvc_explicit_gradient);
-    }
+
+    return error_code;
 }
 
 colvar::gzpathCV::~gzpathCV() {
@@ -857,9 +923,7 @@ void colvar::gzpathCV::calc_gradients() {
         // No matter whether the i-th cv uses implicit gradient, compute it first.
         cv[i_cv]->calc_gradients();
         // If the gradient is not implicit, then add the gradients to its atom groups
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)) {
+        if (cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
             // Temporary variables storing gradients
             colvarvalue tmp_cv_grad_v1 = -1.0 * dzdv1[i_cv];
             colvarvalue tmp_cv_grad_v2 =  1.0 * dzdv2[i_cv];
@@ -872,7 +936,14 @@ void colvar::gzpathCV::calc_gradients() {
                     // Loop over all atoms in the k-th atom group
                     for (size_t l_atom = 0; l_atom < (cv[i_cv]->atom_groups)[k_ag]->size(); ++l_atom) {
                         // Chain rule
-                        (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad = factor_polynomial * ((*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad * tmp_cv_grad_v1[j_elem] + (*(cv[i_cv]->atom_groups)[k_ag])[l_atom].grad * tmp_cv_grad_v2[j_elem]);
+                        cvm::rvector g(
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_x(l_atom),
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_y(l_atom),
+                            (cv[i_cv]->atom_groups)[k_ag]->grad_z(l_atom));
+                        g = factor_polynomial * (g * tmp_cv_grad_v1[j_elem] + g * tmp_cv_grad_v2[j_elem]);
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_x(l_atom) = g.x;
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_y(l_atom) = g.y;
+                        (cv[i_cv]->atom_groups)[k_ag]->grad_z(l_atom) = g.z;
                     }
                 }
             }
@@ -884,14 +955,11 @@ void colvar::gzpathCV::apply_force(colvarvalue const &force) {
     for (size_t i_cv = 0; i_cv < cv.size(); ++i_cv) {
         // If this CV us explicit gradients, then atomic gradients is already calculated
         // We can apply the force to atom groups directly
-        if ( cv[i_cv]->is_enabled(f_cvc_explicit_gradient) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable) &&
-            !cv[i_cv]->is_enabled(f_cvc_scalable_com)) {
+        if (cv[i_cv]->is_enabled(f_cvc_explicit_gradient)) {
             for (size_t k_ag = 0 ; k_ag < cv[i_cv]->atom_groups.size(); ++k_ag) {
                 (cv[i_cv]->atom_groups)[k_ag]->apply_colvar_force(force.real_value);
             }
-        }
-        else {
+        } else {
             colvarvalue tmp_cv_grad_v1 = -1.0 * dzdv1[i_cv];
             colvarvalue tmp_cv_grad_v2 =  1.0 * dzdv2[i_cv];
             // Temporary variables storing gradients
@@ -902,5 +970,3 @@ void colvar::gzpathCV::apply_force(colvarvalue const &force) {
         }
     }
 }
-
-#endif

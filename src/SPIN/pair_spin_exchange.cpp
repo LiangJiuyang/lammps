@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -26,6 +27,7 @@
 #include "atom.h"
 #include "comm.h"
 #include "error.h"
+#include "info.h"
 #include "force.h"
 #include "memory.h"
 #include "neigh_list.h"
@@ -94,9 +96,9 @@ void PairSpinExchange::coeff(int narg, char **arg)
   // check if args correct
 
   if (strcmp(arg[2],"exchange") != 0)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if ((narg != 7) && (narg != 9))
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
   int ilo,ihi,jlo,jhi;
   utils::bounds(FLERR,arg[0],1,atom->ntypes,ilo,ihi,error);
@@ -104,7 +106,6 @@ void PairSpinExchange::coeff(int narg, char **arg)
 
   // get exchange arguments from input command
 
-  int iarg = 7;
   const double rc = utils::numeric(FLERR,arg[3],false,lmp);
   const double j1 = utils::numeric(FLERR,arg[4],false,lmp);
   const double j2 = utils::numeric(FLERR,arg[5],false,lmp);
@@ -112,15 +113,12 @@ void PairSpinExchange::coeff(int narg, char **arg)
 
   // read energy offset flag if specified
 
+  int iarg = 7;
   while (iarg < narg) {
-    if (strcmp(arg[7],"offset") == 0) {
-      if (strcmp(arg[8],"yes") == 0) {
-        e_offset = 1;
-      } else if  (strcmp(arg[8],"no") == 0) {
-        e_offset = 0;
-      } else error->all(FLERR,"Incorrect args for pair coefficients");
+    if (strcmp(arg[iarg],"offset") == 0) {
+      e_offset = utils::logical(FLERR, arg[iarg+1], false, lmp);
       iarg += 2;
-    } else error->all(FLERR,"Incorrect args for pair coefficients");
+    } else error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   }
 
   int count = 0;
@@ -146,7 +144,9 @@ void PairSpinExchange::coeff(int narg, char **arg)
 double PairSpinExchange::init_one(int i, int j)
 {
 
-   if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+   if (setflag[i][j] == 0)
+     error->all(FLERR, Error::NOLASTLINE,
+                "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   J1_mag[j][i] = J1_mag[i][j];
   J1_mech[j][i] = J1_mech[i][j];

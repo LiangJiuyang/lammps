@@ -122,14 +122,6 @@ distance.  The recommended cutoff for this pair style should follow
 the minimum image criterion, i.e. half of the minimum unit cell
 length.
 
-Style *eff/long* (not yet available) computes the same interactions as
-style *eff/cut* except that an additional damping factor is applied so
-it can be used in conjunction with the
-:doc:`kspace_style <kspace_style>` command and its *ewald* or *pppm*
-option.  The Coulombic cutoff specified for this style means that
-pairwise interactions within this distance are computed directly;
-interactions outside that distance are computed in reciprocal space.
-
 This potential is designed to be used with :doc:`atom_style electron <atom_style>` definitions, in order to handle the
 description of systems with interacting nuclei and explicit electrons.
 
@@ -141,14 +133,9 @@ commands, or by mixing as described below:
 
 * cutoff (distance units)
 
-For *eff/cut*\ , the cutoff coefficient is optional.  If it is not used
+For *eff/cut*, the cutoff coefficient is optional.  If it is not used
 (as in some of the examples above), the default global value specified
 in the pair_style command is used.
-
-For *eff/long* (not yet available) no cutoff will be specified for an
-individual I,J type pair via the :doc:`pair_coeff <pair_coeff>` command.
-All type pairs use the same global cutoff specified in the pair_style
-command.
 
 ----------
 
@@ -190,7 +177,7 @@ representations, after the "ecp" keyword.
 
 .. note::
 
-   there are two different pressures that can be reported for eFF
+   There are two different pressures that can be reported for eFF
    when defining this pair_style, one (default) that considers electrons
    do not contribute radial virial components (i.e. electrons treated as
    incompressible 'rigid' spheres) and one that does.  The radial
@@ -232,7 +219,7 @@ complexity in higher Z elements (up to Z<18).  A fixed-core should be
 defined with a mass that includes the corresponding nuclear mass plus
 the 2 s electrons in atomic mass units (2x5.4857990943e-4), and a
 radius equivalent to that of minimized 1s electrons (see examples
-under /examples/USER/eff/fixed-core).  An pseudo-core should be
+under /examples/PACKAGES/eff/fixed-core).  An pseudo-core should be
 described with a mass that includes the corresponding nuclear mass,
 plus all the core electrons (i.e no outer shell electrons), and a
 radius equivalent to that of a corresponding minimized full-electron
@@ -283,7 +270,7 @@ to be specified in an input script that reads a restart file.
 
 These pair styles can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  They do not support the
-*inner*\ , *middle*\ , *outer* keywords.
+*inner*, *middle*, *outer* keywords.
 
 ----------
 
@@ -291,8 +278,8 @@ Restrictions
 """"""""""""
 
 These pair styles will only be enabled if LAMMPS is built with the
-USER-EFF package.  It will only be enabled if LAMMPS was built with
-that package.  See the :doc:`Build package <Build_package>` doc page for
+EFF package.  It will only be enabled if LAMMPS was built with
+that package.  See the :doc:`Build package <Build_package>` page for
 more info.
 
 These pair styles require that particles store electron attributes

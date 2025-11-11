@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -19,8 +20,6 @@
 #include "error.h"
 #include "force.h"
 #include "update.h"
-
-#include <cstring>
 
 using namespace LAMMPS_NS;
 
@@ -98,6 +97,7 @@ template<class DeviceType>
 void ComputeTempKokkos<DeviceType>::compute_vector()
 {
   atomKK->sync(execution_space,datamask_read);
+  atomKK->k_mass.sync<DeviceType>();
 
   int i;
 
@@ -139,7 +139,7 @@ template<int RMASS>
 KOKKOS_INLINE_FUNCTION
 void ComputeTempKokkos<DeviceType>::operator()(TagComputeTempVector<RMASS>, const int &i, CTEMP& t_kk) const {
   if (mask[i] & groupbit) {
-    F_FLOAT massone = 0.0;
+    KK_FLOAT massone = 0.0;
     if (RMASS) massone = rmass[i];
     else massone = mass[type[i]];
     t_kk.t0 += massone * v(i,0)*v(i,0);
@@ -157,4 +157,3 @@ template class ComputeTempKokkos<LMPDeviceType>;
 template class ComputeTempKokkos<LMPHostType>;
 #endif
 }
-

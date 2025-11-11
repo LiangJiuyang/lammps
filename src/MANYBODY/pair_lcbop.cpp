@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,30 +13,30 @@
 ------------------------------------------------------------------------- */
 
 /* ----------------------------------------------------------------------
-   Contributing author: Dominik Wójt (Wroclaw University of Technology)
+   Contributing author: Dominik Wojt (Wroclaw University of Technology)
      based on pair_airebo by Ase Henry (MIT)
 ------------------------------------------------------------------------- */
 
 #include "pair_lcbop.h"
 
+#include "atom.h"
+#include "comm.h"
+#include "error.h"
+#include "force.h"
+#include "info.h"
+#include "memory.h"
+#include "my_page.h"
+#include "neigh_list.h"
+#include "neighbor.h"
+
 #include <cmath>
 #include <cstring>
-#include "atom.h"
-#include "force.h"
-#include "comm.h"
-#include "neighbor.h"
-#include "neigh_list.h"
-#include "neigh_request.h"
-#include "my_page.h"
-#include "memory.h"
-#include "error.h"
-
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 1024
-#define TOL 1.0e-9
-#define PGDELTA 1
+static constexpr int MAXLINE = 1024;
+static constexpr double TOL = 1.0e-9;
+static constexpr int PGDELTA = 1;
 
 /* ---------------------------------------------------------------------- */
 
@@ -66,7 +67,7 @@ PairLCBOP::~PairLCBOP()
 {
   memory->destroy(SR_numneigh);
   memory->sfree(SR_firstneigh);
-  delete [] ipage;
+  delete[] ipage;
   memory->destroy(N);
   memory->destroy(M);
 
@@ -115,7 +116,7 @@ void PairLCBOP::allocate()
 ------------------------------------------------------------------------- */
 
 void PairLCBOP::settings(int narg, char **/*arg*/) {
-  if (narg != 0 ) error->all(FLERR,"Illegal pair_style command");
+  if (narg != 0) error->all(FLERR,"Illegal pair_style command");
 }
 
 /* ----------------------------------------------------------------------
@@ -131,7 +132,7 @@ void PairLCBOP::coeff(int narg, char **arg)
   // only element "C" is allowed
 
   if ((nelements != 1) || (strcmp(elements[0],"C") != 0))
-      error->all(FLERR,"Incorrect args for pair coefficients");
+      error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
   // read potential file and initialize fitting splines
 
@@ -152,10 +153,7 @@ void PairLCBOP::init_style()
 
   // need a full neighbor list, including neighbors of ghosts
 
-  int irequest = neighbor->request(this,instance_me);
-  neighbor->requests[irequest]->half = 0;
-  neighbor->requests[irequest]->full = 1;
-  neighbor->requests[irequest]->ghost = 1;
+  neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
 
   // local SR neighbor list
   // create pages if first time or if neighbor pgsize/oneatom has changed
@@ -166,7 +164,7 @@ void PairLCBOP::init_style()
   if (oneatom != neighbor->oneatom) create = 1;
 
   if (create) {
-    delete [] ipage;
+    delete[] ipage;
     pgsize = neighbor->pgsize;
     oneatom = neighbor->oneatom;
 
@@ -183,7 +181,9 @@ void PairLCBOP::init_style()
 
 double PairLCBOP::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   // cut3rebo = 3 SR distances
 
@@ -278,7 +278,7 @@ void PairLCBOP::SR_neigh()
     SR_numneigh[i] = n;
     ipage->vgot(n);
     if (ipage->status())
-      error->one(FLERR,"Neighbor list overflow, boost neigh_modify one");
+      error->one(FLERR, Error::NOLASTLINE, "Neighbor list overflow, boost neigh_modify one" + utils::errorurl(36));
   }
 
   // calculate M_i
@@ -385,7 +385,7 @@ void PairLCBOP::FSR(int eflag, int /*vflag*/)
       del[0] = delx;
       del[1] = dely;
       del[2] = delz;
-      Bij = bondorder(i,j,del,rijmag,VA,f,vflag_atom);
+      Bij = bondorder(i,j,del,rijmag,VA,f);
       dVAdi = Bij*dVA;
 
       // F = (dVRdi+dVAdi)*(-grad rijmag)
@@ -401,8 +401,7 @@ void PairLCBOP::FSR(int eflag, int /*vflag*/)
 
       double evdwl=0.0;
       if (eflag) evdwl = VR - Bij*VA;
-      if (evflag) ev_tally(i,j,nlocal,newton_pair,
-        evdwl,0.0,fpair,delx,dely,delz);
+      if (evflag) ev_tally(i,j,nlocal,newton_pair,evdwl,0.0,fpair,delx,dely,delz);
     }
   }
 }
@@ -492,8 +491,7 @@ void PairLCBOP::FLR(int eflag, int /*vflag*/)
 
       double evdwl=0.0;
       if (eflag) evdwl = V;
-      if (evflag) ev_tally(i,j,nlocal,newton_pair,
-        evdwl,0.0,fpair,delx,dely,delz);
+      if (evflag) ev_tally(i,j,nlocal,newton_pair,evdwl,0.0,fpair,delx,dely,delz);
     }
   }
 }
@@ -502,7 +500,7 @@ void PairLCBOP::FLR(int eflag, int /*vflag*/)
    forces for Nij and Mij
 ------------------------------------------------------------------------- */
 
-void PairLCBOP::FNij( int i, int j, double factor, double **f, int vflag_atom) {
+void PairLCBOP::FNij( int i, int j, double factor, double **f) {
   int atomi = i;
   int atomj = j;
   int *SR_neighs = SR_firstneigh[i];
@@ -531,7 +529,7 @@ void PairLCBOP::FNij( int i, int j, double factor, double **f, int vflag_atom) {
         f[atomk][1] -= rik[1]*fpair;
         f[atomk][2] -= rik[2]*fpair;
 
-        if (vflag_atom) v_tally2(atomi,atomk,fpair,rik);
+        if (vflag_either) v_tally2(atomi,atomk,fpair,rik);
       }
     }
   }
@@ -539,7 +537,7 @@ void PairLCBOP::FNij( int i, int j, double factor, double **f, int vflag_atom) {
 
 /* ---------------------------------------------------------------------- */
 
-void PairLCBOP::FMij( int i, int j, double factor, double **f, int vflag_atom) {
+void PairLCBOP::FMij( int i, int j, double factor, double **f) {
   int atomi = i;
   int atomj = j;
   int *SR_neighs = SR_firstneigh[i];
@@ -572,12 +570,12 @@ void PairLCBOP::FMij( int i, int j, double factor, double **f, int vflag_atom) {
         f[atomk][0] -= rik[0]*fpair;
         f[atomk][1] -= rik[1]*fpair;
         f[atomk][2] -= rik[2]*fpair;
-        if (vflag_atom) v_tally2(atomi,atomk,fpair,rik);
+        if (vflag_either) v_tally2(atomi,atomk,fpair,rik);
       }
 
       if (dF > TOL) {
         double factor2 = factor*f_c_ik*dF;
-        FNij( atomk, atomi, factor2, f, vflag_atom );
+        FNij(atomk, atomi, factor2, f);
       }
     }
   }
@@ -587,17 +585,15 @@ void PairLCBOP::FMij( int i, int j, double factor, double **f, int vflag_atom) {
    Bij function
 ------------------------------------------------------------------------- */
 
-double PairLCBOP::bondorder(int i, int j, double rij[3],
-    double rijmag, double VA,
-    double **f, int vflag_atom)
+double PairLCBOP::bondorder(int i, int j, double rij[3],double rijmag, double VA,double **f)
 {
 
   double bij, bji;
   /* bij & bji */{
     double rji[3];
     rji[0] = -rij[0]; rji[1] = -rij[1]; rji[2] = -rij[2];
-    bij = b(i,j,rij,rijmag,VA,f,vflag_atom);
-    bji = b(j,i,rji,rijmag,VA,f,vflag_atom);
+    bij = b(i,j,rij,rijmag,VA,f);
+    bji = b(j,i,rji,rijmag,VA,f);
   }
 
   double Fij_conj;
@@ -662,31 +658,30 @@ double PairLCBOP::bondorder(int i, int j, double rij[3],
     }
 
     double dF_dNij, dF_dNji, dF_dNconj;
-    Fij_conj = F_conj( Nij, Nji, Nconj, &dF_dNij, &dF_dNji, &dF_dNconj );
+    Fij_conj = F_conj(Nij, Nji, Nconj, &dF_dNij, &dF_dNji, &dF_dNconj);
 
     /*forces for Nij*/
     if (3-Nij > TOL) {
-      double factor = -VA*0.5*( dF_dNij + dF_dNconj*( dNconj_dNij + dNconj_dNel*dNij_el_dNij ) );
-      FNij( i, j, factor, f, vflag_atom );
+      double factor = -VA*0.5*(dF_dNij + dF_dNconj*(dNconj_dNij + dNconj_dNel*dNij_el_dNij));
+      FNij(i, j, factor, f);
     }
     /*forces for Nji*/
     if (3-Nji > TOL) {
-      double factor = -VA*0.5*( dF_dNji + dF_dNconj*( dNconj_dNji + dNconj_dNel*dNji_el_dNji ) );
-      FNij( j, i, factor, f, vflag_atom );
+      double factor = -VA*0.5*(dF_dNji + dF_dNconj*(dNconj_dNji + dNconj_dNel*dNji_el_dNji));
+      FNij(j, i, factor, f);
     }
     /*forces for Mij*/
     if (3-Mij > TOL) {
-      double factor = -VA*0.5*( dF_dNconj*dNconj_dNel*dNij_el_dMij );
-      FMij( i, j, factor, f, vflag_atom );
+      double factor = -VA*0.5*(dF_dNconj*dNconj_dNel*dNij_el_dMij);
+      FMij(i, j, factor, f);
     }
     if (3-Mji > TOL) {
-      double factor = -VA*0.5*( dF_dNconj*dNconj_dNel*dNji_el_dMji );
-      FMij( j, i, factor, f, vflag_atom );
+      double factor = -VA*0.5*(dF_dNconj*dNconj_dNel*dNji_el_dMji);
+      FMij(j,i,factor,f);
     }
   }
 
-
-  double Bij = 0.5*( bij + bji + Fij_conj );
+  double Bij = 0.5*(bij + bji + Fij_conj);
   return Bij;
 }
 
@@ -694,9 +689,7 @@ double PairLCBOP::bondorder(int i, int j, double rij[3],
   bij function
 ------------------------------------------------------------------------- */
 
-double PairLCBOP::b(int i, int j, double rij[3],
-                 double rijmag, double VA,
-                 double **f, int vflag_atom) {
+double PairLCBOP::b(int i, int j, double rij[3], double rijmag, double VA, double **f) {
   int *SR_neighs = SR_firstneigh[i];
   double **x = atom->x;
   int atomi = i;
@@ -817,7 +810,7 @@ double PairLCBOP::b(int i, int j, double rij[3],
       f[atomj][0] += fj[0]; f[atomj][1] += fj[1]; f[atomj][2] += fj[2];
       f[atomk][0] += fk[0]; f[atomk][1] += fk[1]; f[atomk][2] += fk[2];
 
-      if (vflag_atom) {
+      if (vflag_either) {
         double rji[3], rki[3];
         rji[0] = -rij[0]; rji[1] = -rij[1]; rji[2] = -rij[2];
         rki[0] = -rik[0]; rki[1] = -rik[1]; rki[2] = -rik[2];
@@ -936,15 +929,12 @@ void PairLCBOP::read_file(char *filename)
 
   if (comm->me == 0) {
     FILE *fp = utils::open_potential(filename,lmp,nullptr);
-    if (fp == nullptr) {
-      char str[128];
-      snprintf(str,128,"Cannot open LCBOP potential file %s",filename);
-      error->one(FLERR,str);
-    }
+    if (fp == nullptr)
+      error->one(FLERR,"Cannot open LCBOP potential file {}: {}",filename,utils::getsyserror());
 
     // skip initial comment lines
 
-    while (1) {
+    while (true) {
       utils::sfgets(FLERR,s,MAXLINE,fp,filename,error);
       if (s[0] != '#') break;
     }
@@ -980,7 +970,7 @@ void PairLCBOP::read_file(char *filename)
     utils::sfgets(FLERR,s,MAXLINE,fp,filename,error);    sscanf(s,"%lg",&eps);
     utils::sfgets(FLERR,s,MAXLINE,fp,filename,error);    sscanf(s,"%lg",&delta);
 
-    while (1) {
+    while (true) {
       utils::sfgets(FLERR,s,MAXLINE,fp,filename,error);
       if (s[0] != '#') break;
     }
@@ -997,7 +987,7 @@ void PairLCBOP::read_file(char *filename)
             &F_conj_data[i][2][k][l],
             &F_conj_data[i][3][k][l]);
         }
-        while (1) { utils::sfgets(FLERR,s,MAXLINE,fp,filename,error); if (s[0] != '#') break; }
+        while (true) { utils::sfgets(FLERR,s,MAXLINE,fp,filename,error); if (s[0] != '#') break; }
       }
     }
 

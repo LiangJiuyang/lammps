@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -124,10 +125,8 @@ void remap_3d(FFT_SCALAR *in, FFT_SCALAR *out, FFT_SCALAR *buf,
       for (int i=0;i<plan->nrecv;i++)
         recvBufferSize += plan->recv_size[i];
 
-      FFT_SCALAR *packedSendBuffer
-        = (FFT_SCALAR *) malloc(sizeof(FFT_SCALAR) * sendBufferSize);
-      FFT_SCALAR *packedRecvBuffer
-        = (FFT_SCALAR *) malloc(sizeof(FFT_SCALAR) * recvBufferSize);
+      auto *packedSendBuffer = (FFT_SCALAR *) malloc(sizeof(FFT_SCALAR) * sendBufferSize + 1);
+      auto *packedRecvBuffer = (FFT_SCALAR *) malloc(sizeof(FFT_SCALAR) * recvBufferSize + 1);
 
       int *sendcnts = (int *) malloc(sizeof(int) * plan->commringlen);
       int *rcvcnts = (int *) malloc(sizeof(int) * plan->commringlen);
@@ -283,10 +282,16 @@ struct remap_plan_3d *remap_3d_create_plan(
   // combine output extents across all procs
 
   inarray = (struct extent_3d *) malloc(nprocs*sizeof(struct extent_3d));
-  if (inarray == nullptr) return nullptr;
+  if (inarray == nullptr) {
+    free(plan);
+    return nullptr;
+  }
 
   outarray = (struct extent_3d *) malloc(nprocs*sizeof(struct extent_3d));
-  if (outarray == nullptr) return nullptr;
+  if (outarray == nullptr) {
+    free(plan);
+    return nullptr;
+  }
 
   MPI_Allgather(&out,sizeof(struct extent_3d),MPI_BYTE,
                 outarray,sizeof(struct extent_3d),MPI_BYTE,comm);
@@ -547,7 +552,7 @@ struct remap_plan_3d *remap_3d_create_plan(
 
     // resize commringlist to final size
 
-    commringlist = (int *) realloc(commringlist, commringlen*sizeof(int));
+    commringlist = (int *) realloc(commringlist, commringlen*sizeof(int) + 1);
 
     // set the plan->commringlist
 
@@ -638,7 +643,7 @@ void remap_3d_destroy_plan(struct remap_plan_3d *plan)
 {
   // free MPI communicator
 
-  if (!((plan->usecollective) && (plan->commringlen == 0)))
+  if (!(plan->usecollective) || (plan->commringlen != 0))
     MPI_Comm_free(&plan->comm);
 
   if (plan->usecollective) {

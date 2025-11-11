@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -13,9 +13,9 @@
 
 // NOTE: this file is *supposed* to be included multiple times
 
-#ifdef LMP_USER_OMP
+#ifdef LMP_OPENMP
 
-// true interface to USER-OMP
+// true interface to OPENMP
 
 // provide a DomainOMP class with some overrides for Domain
 #include "domain.h"
@@ -28,17 +28,19 @@ namespace LAMMPS_NS {
 class DomainOMP : public Domain {
  public:
   DomainOMP(class LAMMPS *lmp) : Domain(lmp) {}
-  virtual ~DomainOMP() {}
+  ~DomainOMP() override = default;
 
   // multi-threaded versions
-  virtual void pbc();
-  virtual void lamda2x(int);
-  virtual void lamda2x(double *lamda, double *x) {Domain::lamda2x(lamda,x);}
-  virtual void x2lamda(int);
-  virtual void x2lamda(double *x, double *lamda) {Domain::x2lamda(x,lamda);}
+  void pbc() override;
+  void lamda2x(int) override;
+  void lamda2x(int,int) override;
+  void lamda2x(double *lamda, double *x) override { Domain::lamda2x(lamda, x); }
+  void x2lamda(int) override;
+  void x2lamda(int,int) override;
+  void x2lamda(double *x, double *lamda) override { Domain::x2lamda(x, lamda); }
 };
-}
+}    // namespace LAMMPS_NS
 
 #endif /* LMP_DOMAIN_OMP_H */
 
-#endif /* !LMP_USER_OMP */
+#endif /* !LMP_OPENMP */

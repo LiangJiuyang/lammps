@@ -1,7 +1,7 @@
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS Development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -11,14 +11,12 @@
    See the README file in the top-level LAMMPS directory.
 ------------------------------------------------------------------------- */
 
+#include "../testing/core.h"
 #include "MANYBODY/pair_eim.h"
 #include "info.h"
-#include "input.h"
-#include "lammps.h"
 #include "utils.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
-#include "../testing/core.h"
 
 #include <cstring>
 #include <mpi.h>
@@ -39,7 +37,7 @@ protected:
         testbinary = "EIMPotentialFileReaderTest";
         LAMMPSTest::SetUp();
         ASSERT_NE(lmp, nullptr);
-    
+
         BEGIN_HIDE_OUTPUT();
         command("units metal");
         END_HIDE_OUTPUT();

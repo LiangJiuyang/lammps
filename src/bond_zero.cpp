@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -79,7 +80,7 @@ void BondZero::allocate()
 void BondZero::coeff(int narg, char **arg)
 {
   if ((narg < 1) || (coeffflag && narg > 2))
-    error->all(FLERR,"Incorrect args for bond coefficients");
+    error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
 
   if (!allocated) allocate();
 
@@ -97,7 +98,7 @@ void BondZero::coeff(int narg, char **arg)
     count++;
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for bond coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------

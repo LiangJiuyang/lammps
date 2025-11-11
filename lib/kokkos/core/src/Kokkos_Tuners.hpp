@@ -1,53 +1,31 @@
-/*
 //@HEADER
 // ************************************************************************
 //
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
+//                        Kokkos v. 4.0
+//       Copyright (2022) National Technology & Engineering
 //               Solutions of Sandia, LLC (NTESS).
 //
 // Under the terms of Contract DE-NA0003525 with NTESS,
 // the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
+// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
+// See https://kokkos.org/LICENSE for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
 //@HEADER
-*/
 
+#ifndef KOKKOS_IMPL_PUBLIC_INCLUDE
+#include <Kokkos_Macros.hpp>
+static_assert(false,
+              "Including non-public Kokkos header files is not allowed.");
+#endif
 #ifndef KOKKOS_KOKKOS_TUNERS_HPP
 #define KOKKOS_KOKKOS_TUNERS_HPP
 
 #include <Kokkos_Macros.hpp>
 #include <Kokkos_Core_fwd.hpp>
 #include <Kokkos_ExecPolicy.hpp>
+#include <KokkosExp_MDRangePolicy.hpp>
 #include <impl/Kokkos_Profiling_Interface.hpp>
 
 #include <array>
@@ -74,6 +52,8 @@ VariableValue make_variable_value(size_t, int64_t);
 VariableValue make_variable_value(size_t, double);
 SetOrRange make_candidate_range(double lower, double upper, double step,
                                 bool openLower, bool openUpper);
+SetOrRange make_candidate_range(int64_t lower, int64_t upper, int64_t step,
+                                bool openLower, bool openUpper);
 size_t get_new_context_id();
 void begin_context(size_t context_id);
 void end_context(size_t context_id);
@@ -91,9 +71,7 @@ template <typename ValueType, typename ContainedType>
 struct ValueHierarchyNode {
   std::vector<ValueType> root_values;
   std::vector<ContainedType> sub_values;
-  void add_root_value(const ValueType& in) noexcept {
-    root_values.push_back(in);
-  }
+  void add_root_value(const ValueType& in) { root_values.push_back(in); }
   void add_sub_container(const ContainedType& in) { sub_values.push_back(in); }
   const ValueType& get_root_value(const size_t index) const {
     return root_values[index];
@@ -108,9 +86,7 @@ struct ValueHierarchyNode<ValueType, void> {
   std::vector<ValueType> root_values;
   explicit ValueHierarchyNode(std::vector<ValueType> rv)
       : root_values(std::move(rv)) {}
-  void add_root_value(const ValueType& in) noexcept {
-    root_values.push_back(in);
-  }
+  void add_root_value(const ValueType& in) { root_values.push_back(in); }
   const ValueType& get_root_value(const size_t index) const {
     return root_values[index];
   }
@@ -182,14 +158,28 @@ struct get_space_dimensionality;
 // The dimensionality of a vector is 1
 template <class T>
 struct get_space_dimensionality<std::vector<T>> {
-  static constexpr const int value = 1;
+  static constexpr int value = 1;
 };
 
 // The dimensionality of a map is 1 (the map) plus the dimensionality
 // of the map's value type
 template <class K, class V>
 struct get_space_dimensionality<std::map<K, V>> {
-  static constexpr const int value = 1 + get_space_dimensionality<V>::value;
+  static constexpr int value = 1 + get_space_dimensionality<V>::value;
+};
+
+template <class T, int N>
+struct n_dimensional_sparse_structure;
+
+template <class T>
+struct n_dimensional_sparse_structure<T, 1> {
+  using type = std::vector<T>;
+};
+
+template <class T, int N>
+struct n_dimensional_sparse_structure {
+  using type =
+      std::map<T, typename n_dimensional_sparse_structure<T, N - 1>::type>;
 };
 
 /**
@@ -264,13 +254,14 @@ auto get_point_helper(const PointType& in, const ArrayType& indices,
 template <typename PointType, typename ArrayType>
 struct GetPoint;
 
-template <typename PointType, size_t X>
-struct GetPoint<PointType,
-                std::array<Kokkos::Tools::Experimental::VariableValue, X>> {
+template <typename PointType, size_t ArraySize>
+struct GetPoint<
+    PointType,
+    std::array<Kokkos::Tools::Experimental::VariableValue, ArraySize>> {
   using index_set_type =
-      std::array<Kokkos::Tools::Experimental::VariableValue, X>;
+      std::array<Kokkos::Tools::Experimental::VariableValue, ArraySize>;
   static auto build(const PointType& in, const index_set_type& indices) {
-    return get_point_helper(in, indices, std::make_index_sequence<X>{});
+    return get_point_helper(in, indices, std::make_index_sequence<ArraySize>{});
   }
 };
 
@@ -286,13 +277,16 @@ template <template <class...> class Container, size_t MaxDimensionSize = 100,
 class MultidimensionalSparseTuningProblem {
  public:
   using ProblemSpaceInput = Container<TemplateArguments...>;
-  static constexpr const int space_dimensionality =
+  static constexpr int space_dimensionality =
       Impl::get_space_dimensionality<ProblemSpaceInput>::value;
-  static constexpr const size_t max_space_dimension_size = MaxDimensionSize;
-  static constexpr const double tuning_min               = 0.0;
-  static constexpr const double tuning_max               = 0.999;
-  static constexpr const double tuning_step =
-      tuning_max / max_space_dimension_size;
+  static constexpr size_t max_space_dimension_size = MaxDimensionSize;
+  static constexpr double tuning_min               = 0.0;
+  static constexpr double tuning_max               = 0.999;
+
+  // Not declared as static constexpr to work around the following compiler bug
+  // https://gcc.gnu.org/bugzilla/show_bug.cgi?id=96862
+  // where a floating-point expression cannot be constexpr under -frounding-math
+  double tuning_step = tuning_max / max_space_dimension_size;
 
   using StoredProblemSpace =
       typename Impl::MapTypeConverter<ProblemSpaceInput>::type;
@@ -301,18 +295,46 @@ class MultidimensionalSparseTuningProblem {
 
   using ValueArray = std::array<Kokkos::Tools::Experimental::VariableValue,
                                 space_dimensionality>;
+  template <class Key, class Value>
+  using extended_map = std::map<Key, Value>;
+  template <typename Key>
+  using extended_problem =
+      MultidimensionalSparseTuningProblem<extended_map, MaxDimensionSize, Key,
+                                          ProblemSpaceInput>;
+  template <typename Key, typename Value>
+  using ExtendedProblemSpace =
+      typename Impl::MapTypeConverter<extended_map<Key, Value>>::type;
+
+  template <typename Key>
+  auto extend(const std::string& axis_name,
+              const std::vector<Key>& new_tuning_axis) const
+      -> extended_problem<Key> {
+    ExtendedProblemSpace<Key, ProblemSpaceInput> extended_space;
+    for (auto& key : new_tuning_axis) {
+      extended_space.add_root_value(key);
+      extended_space.add_sub_container(m_space);
+    }
+    std::vector<std::string> extended_names;
+    extended_names.reserve(m_variable_names.size() + 1);
+    extended_names.push_back(axis_name);
+    extended_names.insert(extended_names.end(), m_variable_names.begin(),
+                          m_variable_names.end());
+    return extended_problem<Key>(extended_space, extended_names);
+  }
 
  private:
   StoredProblemSpace m_space;
   std::array<size_t, space_dimensionality> variable_ids;
+  std::vector<std::string> m_variable_names;
   size_t context;
 
  public:
   MultidimensionalSparseTuningProblem() = default;
-  MultidimensionalSparseTuningProblem(ProblemSpaceInput space,
+
+  MultidimensionalSparseTuningProblem(StoredProblemSpace space,
                                       const std::vector<std::string>& names)
-      : m_space(HierarchyConstructor::build(space)) {
-    assert(names.size() == space_dimensionality);
+      : m_space(std::move(space)), m_variable_names(names) {
+    KOKKOS_ASSERT(names.size() == space_dimensionality);
     for (unsigned long x = 0; x < names.size(); ++x) {
       VariableInfo info;
       info.type = Kokkos::Tools::Experimental::ValueType::kokkos_value_double;
@@ -326,6 +348,20 @@ class MultidimensionalSparseTuningProblem {
     }
   }
 
+  MultidimensionalSparseTuningProblem(ProblemSpaceInput space,
+                                      const std::vector<std::string>& names)
+      : MultidimensionalSparseTuningProblem(HierarchyConstructor::build(space),
+                                            names) {}
+
+  template <typename... Coordinates>
+  auto get_point(Coordinates... coordinates) {
+    using ArrayType = std::array<Kokkos::Tools::Experimental::VariableValue,
+                                 sizeof...(coordinates)>;
+    return Impl::get_point(
+        m_space, ArrayType({Kokkos::Tools::Experimental::make_variable_value(
+                     0, static_cast<double>(coordinates))...}));
+  }
+
   auto begin() {
     context = Kokkos::Tools::Experimental::get_new_context_id();
     ValueArray values;
@@ -335,10 +371,30 @@ class MultidimensionalSparseTuningProblem {
     }
     begin_context(context);
     request_output_values(context, space_dimensionality, values.data());
-    return get_point(m_space, values);
+    return Impl::get_point(m_space, values);
   }
 
   auto end() { end_context(context); }
+};
+
+template <typename Tuner>
+struct ExtendableTunerMixin {
+  template <typename Key>
+  auto combine(const std::string& axis_name,
+               const std::vector<Key>& new_axis) const {
+    const auto& sub_tuner = static_cast<const Tuner*>(this)->get_tuner();
+    return sub_tuner.extend(axis_name, new_axis);
+  }
+
+  template <typename... Coordinates>
+  auto get_point(Coordinates... coordinates) {
+    const auto& sub_tuner = static_cast<const Tuner*>(this)->get_tuner();
+    return sub_tuner.get_point(coordinates...);
+  }
+
+ private:
+  ExtendableTunerMixin() = default;
+  friend Tuner;
 };
 
 template <size_t MaxDimensionSize = 100, template <class...> class Container,
@@ -348,7 +404,8 @@ auto make_multidimensional_sparse_tuning_problem(
   return MultidimensionalSparseTuningProblem<Container, MaxDimensionSize,
                                              TemplateArguments...>(in, names);
 }
-class TeamSizeTuner {
+
+class TeamSizeTuner : public ExtendableTunerMixin<TeamSizeTuner> {
  private:
   using SpaceDescription = std::map<int64_t, std::vector<int64_t>>;
   using TunerType = decltype(make_multidimensional_sparse_tuning_problem<20>(
@@ -357,18 +414,19 @@ class TeamSizeTuner {
   TunerType tuner;
 
  public:
-  TeamSizeTuner()        = default;
+  TeamSizeTuner()                                      = default;
   TeamSizeTuner& operator=(const TeamSizeTuner& other) = default;
   TeamSizeTuner(const TeamSizeTuner& other)            = default;
-  TeamSizeTuner& operator=(TeamSizeTuner&& other) = default;
-  TeamSizeTuner(TeamSizeTuner&& other)            = default;
+  TeamSizeTuner& operator=(TeamSizeTuner&& other)      = default;
+  TeamSizeTuner(TeamSizeTuner&& other)                 = default;
   template <typename ViableConfigurationCalculator, typename Functor,
             typename TagType, typename... Properties>
   TeamSizeTuner(const std::string& name,
-                Kokkos::TeamPolicy<Properties...>& policy,
+                const Kokkos::TeamPolicy<Properties...>& policy_in,
                 const Functor& functor, const TagType& tag,
                 ViableConfigurationCalculator calc) {
-    using PolicyType           = Kokkos::TeamPolicy<Properties...>;
+    using PolicyType = Kokkos::TeamPolicy<Properties...>;
+    PolicyType policy(policy_in);
     auto initial_vector_length = policy.impl_vector_length();
     if (initial_vector_length < 1) {
       policy.impl_set_vector_length(1);
@@ -450,7 +508,8 @@ class TeamSizeTuner {
   }
 
   template <typename... Properties>
-  void tune(Kokkos::TeamPolicy<Properties...>& policy) {
+  auto tune(const Kokkos::TeamPolicy<Properties...>& policy_in) {
+    Kokkos::TeamPolicy<Properties...> policy(policy_in);
     if (Kokkos::Tools::Experimental::have_tuning_tool()) {
       auto configuration = tuner.begin();
       auto team_size     = std::get<1>(configuration);
@@ -460,6 +519,7 @@ class TeamSizeTuner {
         policy.impl_set_vector_length(vector_length);
       }
     }
+    return policy;
   }
   void end() {
     if (Kokkos::Tools::Experimental::have_tuning_tool()) {
@@ -467,8 +527,217 @@ class TeamSizeTuner {
     }
   }
 
- private:
+  TunerType get_tuner() const { return tuner; }
 };
+namespace Impl {
+template <class T>
+struct tuning_type_for;
+
+template <>
+struct tuning_type_for<double> {
+  static constexpr Kokkos::Tools::Experimental::ValueType value =
+      Kokkos::Tools::Experimental::ValueType::kokkos_value_double;
+  static double get(
+      const Kokkos::Tools::Experimental::VariableValue& value_struct) {
+    return value_struct.value.double_value;
+  }
+};
+template <>
+struct tuning_type_for<int64_t> {
+  static constexpr Kokkos::Tools::Experimental::ValueType value =
+      Kokkos::Tools::Experimental::ValueType::kokkos_value_int64;
+  static int64_t get(
+      const Kokkos::Tools::Experimental::VariableValue& value_struct) {
+    return value_struct.value.int_value;
+  }
+};
+}  // namespace Impl
+template <class Bound>
+class SingleDimensionalRangeTuner {
+  size_t id;
+  size_t context;
+  using tuning_util = Impl::tuning_type_for<Bound>;
+
+  Bound default_value;
+
+ public:
+  SingleDimensionalRangeTuner() = default;
+  SingleDimensionalRangeTuner(
+      const std::string& name,
+      Kokkos::Tools::Experimental::StatisticalCategory category,
+      Bound default_val, Bound lower, Bound upper, Bound step = (Bound)0) {
+    default_value = default_val;
+    Kokkos::Tools::Experimental::VariableInfo info;
+    info.category   = category;
+    info.candidates = make_candidate_range(
+        static_cast<Bound>(lower), static_cast<Bound>(upper),
+        static_cast<Bound>(step), false, false);
+    info.valueQuantity =
+        Kokkos::Tools::Experimental::CandidateValueType::kokkos_value_range;
+    info.type = tuning_util::value;
+    id        = Kokkos::Tools::Experimental::declare_output_type(name, info);
+  }
+
+  Bound begin() {
+    context = Kokkos::Tools::Experimental::get_new_context_id();
+    Kokkos::Tools::Experimental::begin_context(context);
+    auto tuned_value =
+        Kokkos::Tools::Experimental::make_variable_value(id, default_value);
+    Kokkos::Tools::Experimental::request_output_values(context, 1,
+                                                       &tuned_value);
+    return tuning_util::get(tuned_value);
+  }
+
+  void end() { Kokkos::Tools::Experimental::end_context(context); }
+
+  template <typename Functor>
+  void with_tuned_value(Functor& func) {
+    func(begin());
+    end();
+  }
+};
+
+class RangePolicyOccupancyTuner {
+ private:
+  using TunerType = SingleDimensionalRangeTuner<int64_t>;
+  TunerType tuner;
+
+ public:
+  RangePolicyOccupancyTuner() = default;
+  template <typename ViableConfigurationCalculator, typename Functor,
+            typename TagType, typename... Properties>
+  RangePolicyOccupancyTuner(const std::string& name,
+                            const Kokkos::RangePolicy<Properties...>&,
+                            const Functor&, const TagType&,
+                            ViableConfigurationCalculator)
+      : tuner(TunerType(name,
+                        Kokkos::Tools::Experimental::StatisticalCategory::
+                            kokkos_value_ratio,
+                        100, 5, 100, 5)) {}
+
+  template <typename... Properties>
+  auto tune(const Kokkos::RangePolicy<Properties...>& policy_in) {
+    Kokkos::RangePolicy<Properties...> policy(policy_in);
+    if (Kokkos::Tools::Experimental::have_tuning_tool()) {
+      auto occupancy = tuner.begin();
+      policy.impl_set_desired_occupancy(
+          Kokkos::Experimental::DesiredOccupancy{static_cast<int>(occupancy)});
+    }
+    return policy;
+  }
+  void end() {
+    if (Kokkos::Tools::Experimental::have_tuning_tool()) {
+      tuner.end();
+    }
+  }
+
+  TunerType get_tuner() const { return tuner; }
+};
+
+namespace Impl {
+
+template <typename T>
+void fill_tile(std::vector<T>& cont, int tile_size) {
+  for (int x = 1; x < tile_size; x *= 2) {
+    cont.push_back(x);
+  }
+}
+template <typename T, typename Mapped>
+void fill_tile(std::map<T, Mapped>& cont, int tile_size) {
+  for (int x = 1; x < tile_size; x *= 2) {
+    fill_tile(cont[x], tile_size / x);
+  }
+}
+}  // namespace Impl
+
+template <int MDRangeRank>
+struct MDRangeTuner : public ExtendableTunerMixin<MDRangeTuner<MDRangeRank>> {
+ private:
+  static constexpr int rank       = MDRangeRank;
+  static constexpr int max_slices = 15;
+  using SpaceDescription =
+      typename Impl::n_dimensional_sparse_structure<int, rank>::type;
+  using TunerType =
+      decltype(make_multidimensional_sparse_tuning_problem<max_slices>(
+          std::declval<SpaceDescription>(),
+          std::declval<std::vector<std::string>>()));
+  TunerType tuner;
+
+ public:
+  MDRangeTuner() = default;
+  template <typename Functor, typename TagType, typename Calculator,
+            typename... Properties>
+  MDRangeTuner(const std::string& name,
+               const Kokkos::MDRangePolicy<Properties...>& policy,
+               const Functor& functor, const TagType& tag, Calculator calc) {
+    SpaceDescription desc;
+    int max_tile_size =
+        calc.get_mdrange_max_tile_size_product(policy, functor, tag);
+    Impl::fill_tile(desc, max_tile_size);
+    std::vector<std::string> feature_names;
+    for (int x = 0; x < rank; ++x) {
+      feature_names.push_back(name + "_tile_size_" + std::to_string(x));
+    }
+    tuner = make_multidimensional_sparse_tuning_problem<max_slices>(
+        desc, feature_names);
+  }
+  template <typename Policy, typename Tuple, size_t... Indices>
+  void set_policy_tile(Policy& policy, const Tuple& tuple,
+                       const std::index_sequence<Indices...>&) {
+    policy.impl_change_tile_size({std::get<Indices>(tuple)...});
+  }
+  template <typename... Properties>
+  auto tune(const Kokkos::MDRangePolicy<Properties...>& policy_in) {
+    Kokkos::MDRangePolicy<Properties...> policy(policy_in);
+    if (Kokkos::Tools::Experimental::have_tuning_tool()) {
+      auto configuration = tuner.begin();
+      set_policy_tile(policy, configuration, std::make_index_sequence<rank>{});
+    }
+    return policy;
+  }
+  void end() {
+    if (Kokkos::Tools::Experimental::have_tuning_tool()) {
+      tuner.end();
+    }
+  }
+
+  TunerType get_tuner() const { return tuner; }
+};
+
+template <class Choice>
+struct CategoricalTuner {
+  using choice_list = std::vector<Choice>;
+  choice_list choices;
+  size_t context;
+  size_t tuning_variable_id;
+  CategoricalTuner(std::string name, choice_list m_choices)
+      : choices(m_choices) {
+    std::vector<int64_t> indices;
+    for (typename decltype(choices)::size_type x = 0; x < choices.size(); ++x) {
+      indices.push_back(x);
+    }
+    VariableInfo info;
+    info.category      = StatisticalCategory::kokkos_value_categorical;
+    info.valueQuantity = CandidateValueType::kokkos_value_set;
+    info.type          = ValueType::kokkos_value_int64;
+    info.candidates    = make_candidate_set(indices.size(), indices.data());
+    tuning_variable_id = declare_output_type(name, info);
+  }
+  const Choice& begin() {
+    context = get_new_context_id();
+    begin_context(context);
+    VariableValue value = make_variable_value(tuning_variable_id, int64_t(0));
+    request_output_values(context, 1, &value);
+    return choices[value.value.int_value];
+  }
+  void end() { end_context(context); }
+};
+
+template <typename Choice>
+auto make_categorical_tuner(std::string name, std::vector<Choice> choices)
+    -> CategoricalTuner<Choice> {
+  return CategoricalTuner<Choice>(name, choices);
+}
 
 }  // namespace Experimental
 }  // namespace Tools

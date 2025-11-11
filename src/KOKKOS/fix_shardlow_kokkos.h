@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,13 +12,14 @@
 ------------------------------------------------------------------------- */
 
 #ifdef FIX_CLASS
-
-FixStyle(shardlow/kk,FixShardlowKokkos<LMPDeviceType>)
-FixStyle(shardlow/kk/device,FixShardlowKokkos<LMPDeviceType>)
-FixStyle(shardlow/kk/host,FixShardlowKokkos<LMPHostType>)
-
+// clang-format off
+FixStyle(shardlow/kk,FixShardlowKokkos<LMPDeviceType>);
+FixStyle(shardlow/kk/device,FixShardlowKokkos<LMPDeviceType>);
+FixStyle(shardlow/kk/host,FixShardlowKokkos<LMPHostType>);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_FIX_SHARDLOW_KOKKOS_H
 #define LMP_FIX_SHARDLOW_KOKKOS_H
 
@@ -41,6 +42,7 @@ struct TagFixShardlowSSAUpdateDPDEGhost{};
 template<class DeviceType>
 class FixShardlowKokkos : public FixShardlow {
  public:
+  typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   NeighListKokkos<DeviceType> *k_list; // The SSA specific neighbor list
 
@@ -65,7 +67,7 @@ class FixShardlowKokkos : public FixShardlow {
     params_ssa() {cutinv=FLT_MAX;halfsigma=0;kappa=0;alpha=0;};
     KOKKOS_INLINE_FUNCTION
     params_ssa(int /*i*/) {cutinv=FLT_MAX;halfsigma=0;kappa=0;alpha=0;};
-    F_FLOAT cutinv,halfsigma,kappa,alpha;
+    KK_FLOAT cutinv,halfsigma,kappa,alpha;
   };
 
   template<bool STACKPARAMS>
@@ -85,7 +87,7 @@ class FixShardlowKokkos : public FixShardlow {
 
  protected:
   int workPhase;
-  double theta_ij_inv,boltz_inv,ftm2v,dt;
+  KK_FLOAT theta_ij_inv,boltz_inv,ftm2v,dt;
 
 #ifdef ENABLE_KOKKOS_DPD_CONSTANT_TEMPERATURE
 //  class PairDPDfdt *pairDPD; FIXME as per k_pairDPDE below
@@ -98,28 +100,28 @@ class FixShardlowKokkos : public FixShardlow {
   // hardwired to space for MAX_TYPES_STACKPARAMS (12) atom types
   params_ssa m_params[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
 
-  F_FLOAT m_cutsq[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
-  typename ArrayTypes<DeviceType>::t_ffloat_2d d_cutsq;
+  KK_FLOAT m_cutsq[MAX_TYPES_STACKPARAMS+1][MAX_TYPES_STACKPARAMS+1];
+  typename AT::t_kkfloat_2d d_cutsq;
 
-  typename DAT::tdual_v_array k_v_t0;
-  // typename AT::t_v_array d_v_t0; v_t0 only used in comm routines (on host)
-  typename HAT::t_v_array h_v_t0;
+  typename DAT::tdual_kkfloat_1d_3 k_v_t0;
+  // typename AT::t_kkfloat_1d_3 d_v_t0; v_t0 only used in comm routines (on host)
+  typename HAT::t_kkfloat_1d_3 h_v_t0;
 
-  typename AT::t_x_array x;
-  typename AT::t_v_array v;
-  typename HAT::t_v_array h_v;
-  typename AT::t_efloat_1d uCond, uMech;
-  typename HAT::t_efloat_1d h_uCond, h_uMech;
+  typename AT::t_kkfloat_1d_3_lr x;
+  typename AT::t_kkfloat_1d_3 v;
+  typename HAT::t_double_1d_3_lr h_v;
+  typename AT::t_kkfloat_1d uCond, uMech;
+  typename HAT::t_double_1d h_uCond, h_uMech;
   typename AT::t_int_1d type;
   bool massPerI;
-  typename AT::t_float_1d_randomread masses;
-  typename AT::t_efloat_1d dpdTheta;
+  typename AT::t_kkfloat_1d_randomread masses;
+  typename AT::t_kkfloat_1d dpdTheta;
 
   // Storage for the es_RNG state variables
   typedef Kokkos::View<random_external_state::es_RNG_t*,DeviceType> es_RNGs_type;
   es_RNGs_type d_rand_state;
 
-  double dtsqrt; // = sqrt(update->dt);
+  KK_FLOAT dtsqrt; // = sqrt(update->dt);
   int ghostmax;
   int nlocal, nghost;
 
@@ -151,38 +153,3 @@ class FixShardlowKokkos : public FixShardlow {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-E: Illegal ... command
-
-Self-explanatory.  Check the input script syntax and compare to the
-documentation for the command.  You can use -echo screen as a
-command-line option when running LAMMPS to see the offending line.
-
-E: Must use dpd/fdt pair_style with fix shardlow
-
-Self-explanatory.
-
-E: Must use pair_style dpd/fdt or dpd/fdt/energy with fix shardlow
-
-E: A deterministic integrator must be specified after fix shardlow in input
-file (e.g. fix nve or fix nph).
-
-Self-explanatory.
-
-E: Cannot use constant temperature integration routines with DPD
-
-Self-explanatory.  Must use deterministic integrators such as nve or nph
-
-E: Fix shardlow does not yet support triclinic geometries
-
-Self-explanatory.
-
-E:  Shardlow algorithm requires sub-domain length > 2*(rcut+skin). Either
-reduce the number of processors requested, or change the cutoff/skin
-
-The Shardlow splitting algorithm requires the size of the sub-domain lengths
-to be are larger than twice the cutoff+skin.  Generally, the domain decomposition
-is dependant on the number of processors requested.
-
-*/

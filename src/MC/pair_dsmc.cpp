@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -152,9 +153,9 @@ void PairDSMC::compute(int /*eflag*/, int /*vflag*/)
           convert_double_to_equivalent_int(num_of_collisions_double);
 
         if (num_of_collisions > number_of_A)
-          error->warning(FLERR,"Pair dsmc: num_of_collisions > number_of_A",0);
+          error->warning(FLERR,"Pair dsmc: num_of_collisions > number_of_A");
         if (num_of_collisions > number_of_B)
-          error->warning(FLERR,"Pair dsmc: num_of_collisions > number_of_B",0);
+          error->warning(FLERR,"Pair dsmc: num_of_collisions > number_of_B");
 
         // perform collisions on pairs of particles in icell
 
@@ -239,7 +240,7 @@ void PairDSMC::settings(int narg, char **arg)
 
 void PairDSMC::coeff(int narg, char **arg)
 {
-  if (narg < 3 || narg > 4) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (narg < 3 || narg > 4) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if (!allocated) allocate();
 
   int ilo,ihi,jlo,jhi;
@@ -261,7 +262,7 @@ void PairDSMC::coeff(int narg, char **arg)
     }
   }
 
-  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients");
+  if (count == 0) error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 }
 
 /* ----------------------------------------------------------------------
@@ -270,6 +271,8 @@ void PairDSMC::coeff(int narg, char **arg)
 
 void PairDSMC::init_style()
 {
+  if (!atom->mass) error->all(FLERR, "Pair style dsmc requires per atom type masses");
+
   ncellsx = ncellsy = ncellsz = 1;
   while (((domain->boxhi[0] - domain->boxlo[0])/ncellsx) > max_cell_size)
     ncellsx++;

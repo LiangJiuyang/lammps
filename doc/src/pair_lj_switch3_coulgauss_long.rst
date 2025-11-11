@@ -83,7 +83,7 @@ is combined with Coulomb interaction between Gaussian charge densities:
 
    E = \frac{q_i q_j \mathrm{erf}\left( r/\sqrt{\gamma_1^2+\gamma_2^2} \right) }{\epsilon r_{ij}}
 
-where :math:`q_i` and :math:`q_j` are the charges on the 2 atoms,
+where :math:`q_i` and :math:`q_j` are the charges on the two atoms,
 :math:`\epsilon` is the dielectric constant which can be set by the
 :doc:`dielectric <dielectric>` command, :math:`\gamma_i` and
 :math:`\gamma_j` are the widths of the Gaussian charge distribution and
@@ -130,14 +130,14 @@ to be specified in an input script that reads a restart file.
 
 These pair styles can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  They do not support the
-*inner*\ , *middle*\ , *outer* keywords.
+*inner*, *middle*, *outer* keywords.
 
 Restrictions
 """"""""""""
 
-These styles are part of the USER-YAFF package.  They are only enabled
+These styles are part of the YAFF package.  They are only enabled
 if LAMMPS was built with that package.  See the :doc:`Build package
-<Build_package>` doc page for more info.
+<Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

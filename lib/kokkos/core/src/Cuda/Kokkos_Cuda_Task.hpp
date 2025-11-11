@@ -1,46 +1,18 @@
-/*
 //@HEADER
 // ************************************************************************
 //
-//                        Kokkos v. 3.0
-//       Copyright (2020) National Technology & Engineering
+//                        Kokkos v. 4.0
+//       Copyright (2022) National Technology & Engineering
 //               Solutions of Sandia, LLC (NTESS).
 //
 // Under the terms of Contract DE-NA0003525 with NTESS,
 // the U.S. Government retains certain rights in this software.
 //
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
+// Part of Kokkos, under the Apache License v2.0 with LLVM Exceptions.
+// See https://kokkos.org/LICENSE for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
-// 1. Redistributions of source code must retain the above copyright
-// notice, this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright
-// notice, this list of conditions and the following disclaimer in the
-// documentation and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the Corporation nor the names of the
-// contributors may be used to endorse or promote products derived from
-// this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY NTESS "AS IS" AND ANY
-// EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL NTESS OR THE
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
-// PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-// LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
-// NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Questions? Contact Christian R. Trott (crtrott@sandia.gov)
-//
-// ************************************************************************
 //@HEADER
-*/
 
 #ifndef KOKKOS_IMPL_CUDA_TASK_HPP
 #define KOKKOS_IMPL_CUDA_TASK_HPP
@@ -54,10 +26,31 @@
 #include <Kokkos_Core_fwd.hpp>
 
 #include <impl/Kokkos_TaskBase.hpp>
-#include <Cuda/Kokkos_Cuda_Error.hpp>  // CUDA_SAFE_CALL
+#include <Cuda/Kokkos_Cuda_Error.hpp>  // KOKKOS_IMPL_CUDA_SAFE_CALL
 #include <impl/Kokkos_TaskTeamMember.hpp>
 
 //----------------------------------------------------------------------------
+
+// We allow using deprecated classes in this file
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_PUSH()
+
+// NOLINTBEGIN
+
+#if defined(__CUDA_ARCH__)
+#define KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN(MSG)                           \
+  {                                                                        \
+    __syncwarp();                                                          \
+    const unsigned b = __activemask();                                     \
+    if (b != 0xffffffff) {                                                 \
+      printf(" SYNCWARP AT %s (%d,%d,%d) (%d,%d,%d) failed %x\n", MSG,     \
+             blockIdx.x, blockIdx.y, blockIdx.z, threadIdx.x, threadIdx.y, \
+             threadIdx.z, b);                                              \
+      return;                                                              \
+    }                                                                      \
+  }
+#else
+#define KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN(MSG)
+#endif
 
 namespace Kokkos {
 namespace Impl {
@@ -96,13 +89,12 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
   KOKKOS_INLINE_FUNCTION
   static void iff_single_thread_recursive_execute(scheduler_type const&) {}
 
-  static int get_max_team_count(execution_space const&) {
-    return Kokkos::Impl::cuda_internal_multiprocessor_count() * warps_per_block;
+  static int get_max_team_count(execution_space const& space) {
+    return space.cuda_device_prop().multiProcessorCount * warps_per_block;
   }
 
   __device__ static void driver(scheduler_type scheduler,
                                 int32_t shmem_per_warp) {
-    using queue_type     = typename scheduler_type::task_queue_type;
     using task_base_type = typename scheduler_type::task_base_type;
     using runnable_task_base_type =
         typename scheduler_type::runnable_task_base_type;
@@ -138,13 +130,13 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
       // Broadcast task pointer:
 
       // Sync before the broadcast
-      KOKKOS_IMPL_CUDA_SYNCWARP;
+      __syncwarp(0xffffffff);
 
       // pretend it's an int* for shuffle purposes
       ((int*)&current_task)[0] =
-          KOKKOS_IMPL_CUDA_SHFL(((int*)&current_task)[0], 0, 32);
+          __shfl_sync(0xffffffff, ((int*)&current_task)[0], 0, 32);
       ((int*)&current_task)[1] =
-          KOKKOS_IMPL_CUDA_SHFL(((int*)&current_task)[1], 0, 32);
+          __shfl_sync(0xffffffff, ((int*)&current_task)[1], 0, 32);
 
       if (current_task) {
         KOKKOS_ASSERT(!current_task->as_runnable_task().get_respawn_flag());
@@ -168,7 +160,7 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
 
         // Synchronize threads of the warp and insure memory
         // writes are visible to all threads in the warp.
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         if (shared_memory_task_copy->is_team_runnable()) {
           // Thread Team Task
@@ -182,7 +174,7 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
         // Synchronize threads of the warp and insure memory
         // writes are visible to all threads in the warp.
 
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         // if(warp_lane < b % CudaTraits::WarpSize) b += CudaTraits::WarpSize;
         // b -= b % CudaTraits::WarpSize;
@@ -196,7 +188,7 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
         // writes are visible to root thread of the warp for
         // respawn or completion.
 
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         if (warp_lane == 0) {
           // If respawn requested copy respawn data back to main memory
@@ -234,9 +226,14 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
     }
   }
 
+  // FIXME_CUDA_MULTIPLE_DEVICES
   static void execute(scheduler_type const& scheduler) {
     const int shared_per_warp = 2048;
-    const dim3 grid(Kokkos::Impl::cuda_internal_multiprocessor_count(), 1, 1);
+    const Kokkos::Cuda& exec  = scheduler.get_execution_space();
+    const auto& impl_instance = exec.impl_internal_space_instance();
+    const int multi_processor_count =
+        exec.cuda_device_prop().multiProcessorCount;
+    const dim3 grid(multi_processor_count, 1, 1);
     const dim3 block(1, Kokkos::Impl::CudaTraits::WarpSize, warps_per_block);
     const int shared_total    = shared_per_warp * warps_per_block;
     const cudaStream_t stream = nullptr;
@@ -247,34 +244,37 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
         static_cast<long>(get_max_team_count(scheduler.get_execution_space()) *
                           Kokkos::Impl::CudaTraits::WarpSize));
 
-    auto& queue = scheduler.queue();
-
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::"
+        "Cuda>::execute: Pre Task Execution");
 
     // Query the stack size, in bytes:
 
     size_t previous_stack_size = 0;
-    CUDA_SAFE_CALL(
-        cudaDeviceGetLimit(&previous_stack_size, cudaLimitStackSize));
+    KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_get_limit_wrapper(
+        &previous_stack_size, cudaLimitStackSize));
 
     // If not large enough then set the stack size, in bytes:
 
     const size_t larger_stack_size = 1 << 11;
 
     if (previous_stack_size < larger_stack_size) {
-      CUDA_SAFE_CALL(cudaDeviceSetLimit(cudaLimitStackSize, larger_stack_size));
+      KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_set_limit_wrapper(
+          cudaLimitStackSize, larger_stack_size));
     }
 
     cuda_task_queue_execute<<<grid, block, shared_total, stream>>>(
         scheduler, shared_per_warp);
 
-    CUDA_SAFE_CALL(cudaGetLastError());
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaGetLastError());
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::"
+        "Cuda>::execute: Post Task Execution");
 
     if (previous_stack_size < larger_stack_size) {
-      CUDA_SAFE_CALL(
-          cudaDeviceSetLimit(cudaLimitStackSize, previous_stack_size));
+      KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_set_limit_wrapper(
+          cudaLimitStackSize, previous_stack_size));
     }
   }
 
@@ -295,13 +295,18 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
     destroy_type* dtor_ptr =
         (destroy_type*)((char*)storage + sizeof(function_type));
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::"
+        "Cuda>::execute: Pre Get Function Pointer for Tasks");
 
     set_cuda_task_base_apply_function_pointer<TaskType>
         <<<1, 1>>>(ptr_ptr, dtor_ptr);
 
-    CUDA_SAFE_CALL(cudaGetLastError());
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaGetLastError());
+
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::"
+        "Cuda>::execute: Post Get Function Pointer for Tasks");
 
     ptr  = *ptr_ptr;
     dtor = *dtor_ptr;
@@ -313,9 +318,8 @@ class TaskQueueSpecialization<SimpleTaskScheduler<Kokkos::Cuda, QueueType>> {
 
 template <class Scheduler>
 class TaskQueueSpecializationConstrained<
-    Scheduler,
-    typename std::enable_if<std::is_same<typename Scheduler::execution_space,
-                                         Kokkos::Cuda>::value>::type> {
+    Scheduler, std::enable_if_t<std::is_same<
+                   typename Scheduler::execution_space, Kokkos::Cuda>::value>> {
  public:
   using scheduler_type  = Scheduler;
   using execution_space = Kokkos::Cuda;
@@ -372,23 +376,20 @@ class TaskQueueSpecializationConstrained<
           // count of 0 also. Otherwise, returns a task from another queue
           // or `end` if one couldn't be popped
           task_ptr = team_queue.attempt_to_steal_task();
-#if 0
-          if(task != no_more_tasks_sentinel && task != end) {
-            std::printf("task stolen on rank %d\n", team_exec.league_rank());
-          }
-#endif
         }
       }
 
       // Synchronize warp with memory fence before broadcasting task pointer:
 
       // KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN( "A" );
-      KOKKOS_IMPL_CUDA_SYNCWARP;
+      __syncwarp(0xffffffff);
 
       // Broadcast task pointer:
 
-      ((int*)&task_ptr)[0] = KOKKOS_IMPL_CUDA_SHFL(((int*)&task_ptr)[0], 0, 32);
-      ((int*)&task_ptr)[1] = KOKKOS_IMPL_CUDA_SHFL(((int*)&task_ptr)[1], 0, 32);
+      ((int*)&task_ptr)[0] =
+          __shfl_sync(0xffffffff, ((int*)&task_ptr)[0], 0, 32);
+      ((int*)&task_ptr)[1] =
+          __shfl_sync(0xffffffff, ((int*)&task_ptr)[1], 0, 32);
 
 #if defined(KOKKOS_ENABLE_DEBUG)
       KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN("TaskQueue CUDA task_ptr");
@@ -418,7 +419,7 @@ class TaskQueueSpecializationConstrained<
         // writes are visible to all threads in the warp.
 
         // KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN( "B" );
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         if (task_root_type::TaskTeam == task_shmem->m_task_type) {
           // Thread Team Task
@@ -432,7 +433,7 @@ class TaskQueueSpecializationConstrained<
         // writes are visible to all threads in the warp.
 
         // KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN( "C" );
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         // copy task closure from shared to global memory:
 
@@ -445,7 +446,7 @@ class TaskQueueSpecializationConstrained<
         // respawn or completion.
 
         // KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN( "D" );
-        KOKKOS_IMPL_CUDA_SYNCWARP;
+        __syncwarp(0xffffffff);
 
         // If respawn requested copy respawn data back to main memory
 
@@ -463,10 +464,17 @@ class TaskQueueSpecializationConstrained<
     } while (1);
   }
 
+  // FIXME_CUDA_MULTIPLE_DEVICES
   static void execute(scheduler_type const& scheduler) {
     const int shared_per_warp = 2048;
     const int warps_per_block = 4;
-    const dim3 grid(Kokkos::Impl::cuda_internal_multiprocessor_count(), 1, 1);
+    const Kokkos::Cuda exec   = Cuda();  // FIXME_CUDA_MULTIPLE_DEVICES
+    const auto& impl_instance = exec.impl_internal_space_instance();
+    const int multi_processor_count =
+        // FIXME not sure why this didn't work
+        // exec.cuda_device_prop().multiProcessorCount;
+        impl_instance->m_deviceProp.multiProcessorCount;
+    const dim3 grid(multi_processor_count, 1, 1);
     // const dim3 grid( 1 , 1 , 1 );
     const dim3 block(1, Kokkos::Impl::CudaTraits::WarpSize, warps_per_block);
     const int shared_total    = shared_per_warp * warps_per_block;
@@ -475,32 +483,37 @@ class TaskQueueSpecializationConstrained<
     auto& queue = scheduler.queue();
     queue.initialize_team_queues(warps_per_block * grid.x);
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecializationConstrained<SimpleTaskScheduler<"
+        "Kokkos::Cuda>::execute: Pre Execute Task");
 
     // Query the stack size, in bytes:
 
     size_t previous_stack_size = 0;
-    CUDA_SAFE_CALL(
-        cudaDeviceGetLimit(&previous_stack_size, cudaLimitStackSize));
+    KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_get_limit_wrapper(
+        &previous_stack_size, cudaLimitStackSize));
 
     // If not large enough then set the stack size, in bytes:
 
     const size_t larger_stack_size = 2048;
 
     if (previous_stack_size < larger_stack_size) {
-      CUDA_SAFE_CALL(cudaDeviceSetLimit(cudaLimitStackSize, larger_stack_size));
+      KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_set_limit_wrapper(
+          cudaLimitStackSize, larger_stack_size));
     }
 
     cuda_task_queue_execute<<<grid, block, shared_total, stream>>>(
         scheduler, shared_per_warp);
 
-    CUDA_SAFE_CALL(cudaGetLastError());
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaGetLastError());
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecializationConstrained<SimpleTaskScheduler<"
+        "Kokkos::Cuda>::execute: Post Execute Task");
 
     if (previous_stack_size < larger_stack_size) {
-      CUDA_SAFE_CALL(
-          cudaDeviceSetLimit(cudaLimitStackSize, previous_stack_size));
+      KOKKOS_IMPL_CUDA_SAFE_CALL(impl_instance->cuda_device_set_limit_wrapper(
+          cudaLimitStackSize, previous_stack_size));
     }
   }
 
@@ -516,13 +529,17 @@ class TaskQueueSpecializationConstrained<
     destroy_type* dtor_ptr =
         (destroy_type*)((char*)storage + sizeof(function_type));
 
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecializationConstrained<SimpleTaskScheduler<"
+        "Kokkos::Cuda>::get_function_pointer: Pre Get Function Pointer");
 
     set_cuda_task_base_apply_function_pointer<TaskType>
         <<<1, 1>>>(ptr_ptr, dtor_ptr);
 
-    CUDA_SAFE_CALL(cudaGetLastError());
-    CUDA_SAFE_CALL(cudaDeviceSynchronize());
+    KOKKOS_IMPL_CUDA_SAFE_CALL(cudaGetLastError());
+    Impl::cuda_device_synchronize(
+        "Kokkos::Impl::TaskQueueSpecializationConstrained<SimpleTaskScheduler<"
+        "Kokkos::Cuda>::get_function_pointer: Post Get Function Pointer");
 
     ptr  = *ptr_ptr;
     dtor = *dtor_ptr;
@@ -569,9 +586,9 @@ class TaskExec<Kokkos::Cuda, Scheduler> {
  private:
   enum : int { WarpSize = Kokkos::Impl::CudaTraits::WarpSize };
 
-  TaskExec(TaskExec&&)      = delete;
-  TaskExec(TaskExec const&) = delete;
-  TaskExec& operator=(TaskExec&&) = delete;
+  TaskExec(TaskExec&&)                 = delete;
+  TaskExec(TaskExec const&)            = delete;
+  TaskExec& operator=(TaskExec&&)      = delete;
   TaskExec& operator=(TaskExec const&) = delete;
 
   friend class Kokkos::Impl::TaskQueue<
@@ -580,7 +597,7 @@ class TaskExec<Kokkos::Cuda, Scheduler> {
   template <class, class>
   friend class Kokkos::Impl::TaskQueueSpecializationConstrained;
   template <class>
-  friend class Kokkos::Impl::TaskQueueSpecialization;
+  friend struct Kokkos::Impl::TaskQueueSpecialization;
 
   int32_t* m_team_shmem;
   const int m_team_size;
@@ -609,7 +626,7 @@ class TaskExec<Kokkos::Cuda, Scheduler> {
 
   __device__ void team_barrier() const {
     if (1 < m_team_size) {
-      KOKKOS_IMPL_CUDA_SYNCWARP;
+      __syncwarp(0xffffffff);
     }
   }
 
@@ -657,7 +674,7 @@ struct TeamThreadRangeBoundariesStruct<iType,
   const iType start;
   const iType end;
   const iType increment;
-  member_type const& thread;
+  member_type const& member;
 
 #if defined(__CUDA_ARCH__)
 
@@ -666,7 +683,7 @@ struct TeamThreadRangeBoundariesStruct<iType,
       : start(threadIdx.y),
         end(arg_count),
         increment(blockDim.y),
-        thread(arg_thread) {}
+        member(arg_thread) {}
 
   __device__ inline TeamThreadRangeBoundariesStruct(
       member_type const& arg_thread, const iType& arg_start,
@@ -674,7 +691,7 @@ struct TeamThreadRangeBoundariesStruct<iType,
       : start(arg_start + threadIdx.y),
         end(arg_end),
         increment(blockDim.y),
-        thread(arg_thread) {}
+        member(arg_thread) {}
 
 #else
 
@@ -698,7 +715,7 @@ struct ThreadVectorRangeBoundariesStruct<iType,
   const index_type start;
   const index_type end;
   const index_type increment;
-  const member_type& thread;
+  const member_type& member;
 
 #if defined(__CUDA_ARCH__)
 
@@ -707,7 +724,7 @@ struct ThreadVectorRangeBoundariesStruct<iType,
       : start(threadIdx.x),
         end(arg_count),
         increment(blockDim.x),
-        thread(arg_thread) {}
+        member(arg_thread) {}
 
   __device__ inline ThreadVectorRangeBoundariesStruct(
       member_type const& arg_thread, const index_type& arg_begin,
@@ -715,7 +732,7 @@ struct ThreadVectorRangeBoundariesStruct<iType,
       : start(arg_begin + threadIdx.x),
         end(arg_end),
         increment(blockDim.x),
-        thread(arg_thread) {}
+        member(arg_thread) {}
 
 #else
 
@@ -749,12 +766,12 @@ namespace Kokkos {
 // template<typename iType1, typename iType2>
 // KOKKOS_INLINE_FUNCTION
 // Impl::TeamThreadRangeBoundariesStruct
-//  < typename std::common_type<iType1,iType2>::type
+//  < std::common_type_t<iType1,iType2>
 //  , Impl::TaskExec< Kokkos::Cuda > >
 // TeamThreadRange( const Impl::TaskExec< Kokkos::Cuda > & thread
 //               , const iType1 & begin, const iType2 & end )
 //{
-//  using iType = typename std::common_type< iType1, iType2 >::type;
+//  using iType = std::common_type_t< iType1, iType2 >;
 //  return Impl::TeamThreadRangeBoundariesStruct< iType, Impl::TaskExec<
 //  Kokkos::Cuda > >(
 //           thread, iType(begin), iType(end) );
@@ -879,7 +896,7 @@ i+=loop_boundaries.increment) { lambda(i,result);
   strided_shfl_warp_reduction<ValueType, JoinType>(
                           join,
                           initialized_result,
-                          loop_boundaries.thread.team_size(),
+                          loop_boundaries.member.team_size(),
                           blockDim.x);
   initialized_result = shfl_warp_broadcast<ValueType>( initialized_result,
 threadIdx.x, Impl::CudaTraits::WarpSize );
@@ -905,10 +922,10 @@ KOKKOS_INLINE_FUNCTION void parallel_reduce(
   }
   initialized_result = result;
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     strided_shfl_warp_reduction(
         [&](ValueType& val1, const ValueType& val2) { val1 += val2; },
-        initialized_result, loop_boundaries.thread.team_size(), blockDim.x);
+        initialized_result, loop_boundaries.member.team_size(), blockDim.x);
 
     initialized_result = shfl_warp_broadcast<ValueType>(
         initialized_result, threadIdx.x, Impl::CudaTraits::WarpSize);
@@ -930,12 +947,12 @@ KOKKOS_INLINE_FUNCTION void parallel_reduce(
     lambda(i, result);
   }
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     strided_shfl_warp_reduction(
         [&](ValueType& val1, const ValueType& val2) {
           reducer.join(val1, val2);
         },
-        result, loop_boundaries.thread.team_size(), blockDim.x);
+        result, loop_boundaries.member.team_size(), blockDim.x);
 
     reducer.reference() = shfl_warp_broadcast<ValueType>(
         result, threadIdx.x, Impl::CudaTraits::WarpSize);
@@ -988,7 +1005,7 @@ KOKKOS_INLINE_FUNCTION void parallel_reduce(
 
   initialized_result = result;
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     // initialized_result = multi_shfl_warp_reduction(
     multi_shfl_warp_reduction(
         [&](ValueType& val1, const ValueType& val2) { val1 += val2; },
@@ -1014,7 +1031,7 @@ KOKKOS_INLINE_FUNCTION void parallel_reduce(
     lambda(i, result);
   }
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     multi_shfl_warp_reduction(
         [&](ValueType& val1, const ValueType& val2) {
           reducer.join(val1, val2);
@@ -1040,9 +1057,10 @@ KOKKOS_INLINE_FUNCTION void parallel_scan(
   // Extract value_type from closure
 
   using value_type = typename Kokkos::Impl::FunctorAnalysis<
-      Kokkos::Impl::FunctorPatternInterface::SCAN, void, Closure>::value_type;
+      Kokkos::Impl::FunctorPatternInterface::SCAN, void, Closure,
+      void>::value_type;
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     // make sure all threads perform all loop iterations
     const iType bound = loop_boundaries.end + loop_boundaries.start;
     const int lane    = threadIdx.y * blockDim.x;
@@ -1059,7 +1077,8 @@ KOKKOS_INLINE_FUNCTION void parallel_scan(
       // accum = accumulated, sum in total for this iteration
 
       // INCLUSIVE scan
-      for (int offset = blockDim.x; offset < Impl::CudaTraits::WarpSize;
+      for (int offset = blockDim.x;
+           offset < static_cast<int>(Impl::CudaTraits::WarpSize);
            offset <<= 1) {
         y = Kokkos::shfl_up(val, offset, Impl::CudaTraits::WarpSize);
         if (lane >= offset) {
@@ -1105,9 +1124,10 @@ KOKKOS_INLINE_FUNCTION void parallel_scan(
   // Extract value_type from closure
 
   using value_type = typename Kokkos::Impl::FunctorAnalysis<
-      Kokkos::Impl::FunctorPatternInterface::SCAN, void, Closure>::value_type;
+      Kokkos::Impl::FunctorPatternInterface::SCAN, void, Closure,
+      void>::value_type;
 
-  if (1 < loop_boundaries.thread.team_size()) {
+  if (1 < loop_boundaries.member.team_size()) {
     // make sure all threads perform all loop iterations
     const iType bound = loop_boundaries.end + loop_boundaries.start;
 
@@ -1123,9 +1143,10 @@ KOKKOS_INLINE_FUNCTION void parallel_scan(
       // accum = accumulated, sum in total for this iteration
 
       // INCLUSIVE scan
-      for (int offset = 1; offset < blockDim.x; offset <<= 1) {
+      for (int offset = 1; offset < static_cast<int>(blockDim.x);
+           offset <<= 1) {
         y = Kokkos::shfl_up(val, offset, blockDim.x);
-        if (threadIdx.x >= offset) {
+        if (static_cast<int>(threadIdx.x) >= offset) {
           val += y;
         }
       }
@@ -1163,6 +1184,8 @@ KOKKOS_INLINE_FUNCTION void single(
     const FunctorType& lambda) {
 #ifdef __CUDA_ARCH__
   if (threadIdx.x == 0) lambda();
+#else
+  (void)lambda;
 #endif
 }
 
@@ -1172,6 +1195,8 @@ KOKKOS_INLINE_FUNCTION void single(
     const FunctorType& lambda) {
 #ifdef __CUDA_ARCH__
   if (threadIdx.x == 0 && threadIdx.y == 0) lambda();
+#else
+  (void)lambda;
 #endif
 }
 
@@ -1184,6 +1209,10 @@ KOKKOS_INLINE_FUNCTION void single(
   if (1 < s.team_member.team_size()) {
     val = shfl(val, 0, blockDim.x);
   }
+#else
+  (void)s;
+  (void)val;
+  (void)lambda;
 #endif
 }
 
@@ -1197,6 +1226,10 @@ KOKKOS_INLINE_FUNCTION void single(
     lambda(val);
   }
   single_struct.team_member.team_broadcast(val, 0);
+#else
+  (void)single_struct;
+  (void)val;
+  (void)lambda;
 #endif
 }
 
@@ -1204,6 +1237,12 @@ KOKKOS_INLINE_FUNCTION void single(
 
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
+
+#undef KOKKOS_IMPL_CUDA_SYNCWARP_OR_RETURN
+
+// NOLINTEND
+
+KOKKOS_IMPL_DISABLE_DEPRECATED_WARNINGS_POP()
 
 #endif /* #if defined( KOKKOS_ENABLE_TASKDAG ) */
 #endif /* #ifndef KOKKOS_IMPL_CUDA_TASK_HPP */

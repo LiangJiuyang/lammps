@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -20,6 +21,7 @@
 
 #include "atom.h"
 #include "atom_vec.h"
+#include "bond.h"
 #include "compute.h"
 #include "domain.h"
 #include "dump.h"
@@ -34,26 +36,20 @@
 
 using namespace LAMMPS_NS;
 
-#define BUFFACTOR 1.5
-#define BUFFACTOR 1.5
-#define BUFMIN 1024
-#define EPSILON 1.0e-6
-
-#define DELTA_PROCS 16
+static constexpr double BUFFACTOR = 1.5;
+static constexpr int BUFMIN = 1024;
+static constexpr double EPSILON = 1.0e-6;
+static constexpr int DELTA_PROCS = 16;
 
 /* ---------------------------------------------------------------------- */
 
 CommTiled::CommTiled(LAMMPS *lmp) : Comm(lmp)
 {
-  style = 1;
+  style = Comm::TILED;
   layout = Comm::LAYOUT_UNIFORM;
-  pbc_flag = nullptr;
-  buf_send = nullptr;
-  buf_recv = nullptr;
-  overlap = nullptr;
-  rcbinfo = nullptr;
-  cutghostmulti = nullptr;
-  init_buffers();
+  init_pointers();
+  init_buffers_flag = 0;
+  maxswap = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -65,10 +61,12 @@ CommTiled::CommTiled(LAMMPS *lmp) : Comm(lmp)
 
 CommTiled::CommTiled(LAMMPS * /*lmp*/, Comm *oldcomm) : Comm(*oldcomm)
 {
-  style = 1;
+  style = Comm::TILED;
   layout = oldcomm->layout;
   Comm::copy_arrays(oldcomm);
-  init_buffers();
+  init_pointers();
+  init_buffers_flag = 0;
+  maxswap = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -84,22 +82,58 @@ CommTiled::~CommTiled()
 }
 
 /* ----------------------------------------------------------------------
+   initialize comm pointers to nullptr
+------------------------------------------------------------------------- */
+
+void CommTiled::init_pointers()
+{
+  buf_send = buf_recv = nullptr;
+  overlap = nullptr;
+  rcbinfo = nullptr;
+  cutghostmulti = nullptr;
+
+  nsendproc = nullptr;
+  nrecvproc = nullptr;
+  sendother = nullptr;
+  recvother = nullptr;
+  sendself = nullptr;
+  sendproc = nullptr;
+  recvproc = nullptr;
+  sendnum = nullptr;
+  recvnum = nullptr;
+  size_forward_recv = nullptr;
+  firstrecv = nullptr;
+  size_reverse_send = nullptr;
+  size_reverse_recv = nullptr;
+  forward_recv_offset = nullptr;
+  reverse_recv_offset = nullptr;
+  pbc_flag = nullptr;
+  pbc = nullptr;
+  sendbox = nullptr;
+  sendbox_multi = nullptr;
+  maxsendlist = nullptr;
+  sendlist = nullptr;
+  requests = nullptr;
+  nprocmax = nullptr;
+  nexchproc = nullptr;
+  nexchprocmax = nullptr;
+  exchproc = nullptr;
+  exchnum = nullptr;
+}
+
+/* ----------------------------------------------------------------------
    initialize comm buffers and other data structs local to CommTiled
 ------------------------------------------------------------------------- */
 
 void CommTiled::init_buffers()
 {
-  buf_send = buf_recv = nullptr;
   maxsend = maxrecv = BUFMIN;
   grow_send(maxsend,2);
-  memory->create(buf_recv,maxrecv,"comm:buf_recv");
+  grow_recv(maxrecv,1);
 
   maxoverlap = 0;
-  overlap = nullptr;
-  rcbinfo = nullptr;
-  cutghostmulti = nullptr;
-  sendbox_multi = nullptr;
 
+  // Note this may skip growing multi arrays, will call again in init()
   maxswap = 6;
   allocate_swap(maxswap);
 }
@@ -108,6 +142,11 @@ void CommTiled::init_buffers()
 
 void CommTiled::init()
 {
+  if (!init_buffers_flag) {
+    init_buffers();
+    init_buffers_flag = 1;
+  }
+
   Comm::init();
 
   // cannot set nswap in init_buffers() b/c
@@ -116,8 +155,26 @@ void CommTiled::init()
   nswap = 2*domain->dimension;
 
   memory->destroy(cutghostmulti);
-  if (mode == Comm::MULTI)
-    memory->create(cutghostmulti,atom->ntypes+1,3,"comm:cutghostmulti");
+  if (mode == Comm::MULTI) {
+    // If inconsitent # of collections, destroy any preexisting arrays (may be missized)
+    if (ncollections != neighbor->ncollections) {
+      ncollections = neighbor->ncollections;
+    }
+
+    // delete any old user cutoffs if # of collections chanaged
+    if (cutusermulti && ncollections != ncollections_cutoff) {
+      if(me == 0) error->warning(FLERR, "cutoff/multi settings discarded, must be defined"
+                                        " after customizing collections in neigh_modify");
+      memory->destroy(cutusermulti);
+      cutusermulti = nullptr;
+    }
+
+    // grow sendbox_multi now that ncollections is known
+    for (int i = 0; i < maxswap; i ++)
+      grow_swap_send_multi(i,DELTA_PROCS);
+
+    memory->create(cutghostmulti,ncollections,3,"comm:cutghostmulti");
+  }
 
   int bufextra_old = bufextra;
   init_exchange();
@@ -137,7 +194,6 @@ void CommTiled::setup()
 
   dimension = domain->dimension;
   int *periodicity = domain->periodicity;
-  int ntypes = atom->ntypes;
 
   if (triclinic == 0) {
     prd = domain->prd;
@@ -175,21 +231,38 @@ void CommTiled::setup()
   // check that cutoff < any periodic box length
 
   if (mode == Comm::MULTI) {
-    double *cuttype = neighbor->cuttype;
-    double cut;
-    for (i = 1; i <= ntypes; i++) {
-      cut = 0.0;
-      if (cutusermulti) cut = cutusermulti[i];
-      cutghostmulti[i][0] = MAX(cut,cuttype[i]);
-      cutghostmulti[i][1] = MAX(cut,cuttype[i]);
-      cutghostmulti[i][2] = MAX(cut,cuttype[i]);
+    double **cutcollectionsq = neighbor->cutcollectionsq;
+
+    // build collection array for atom exchange
+    neighbor->build_collection(0);
+
+    // If using multi/reduce, communicate particles a distance equal
+    // to the max cutoff with equally sized or smaller collections
+    // If not, communicate the maximum cutoff of the entire collection
+    for (i = 0; i < ncollections; i++) {
+      if (cutusermulti) {
+        cutghostmulti[i][0] = cutusermulti[i];
+        cutghostmulti[i][1] = cutusermulti[i];
+        cutghostmulti[i][2] = cutusermulti[i];
+      } else {
+        cutghostmulti[i][0] = 0.0;
+        cutghostmulti[i][1] = 0.0;
+        cutghostmulti[i][2] = 0.0;
+      }
+
+      for (j = 0; j < ncollections; j++){
+        if (multi_reduce && (cutcollectionsq[j][j] > cutcollectionsq[i][i])) continue;
+        cutghostmulti[i][0] = MAX(cutghostmulti[i][0],sqrt(cutcollectionsq[i][j]));
+        cutghostmulti[i][1] = MAX(cutghostmulti[i][1],sqrt(cutcollectionsq[i][j]));
+        cutghostmulti[i][2] = MAX(cutghostmulti[i][2],sqrt(cutcollectionsq[i][j]));
+      }
     }
   }
 
   double cut = get_comm_cutoff();
   if ((cut == 0.0) && (me == 0))
-    error->warning(FLERR,"Communication cutoff is 0.0. No ghost atoms "
-                   "will be generated. Atoms may get lost.");
+    error->warning(FLERR,"Communication cutoff is 0.0. No ghost atoms will be generated. "
+                   "Energies and forces may be wrong and atoms may get lost.");
 
   if (triclinic == 0) cutghost[0] = cutghost[1] = cutghost[2] = cut;
   else {
@@ -202,7 +275,7 @@ void CommTiled::setup()
     length2 = h_inv[2];
     cutghost[2] = cut * length2;
     if (mode == Comm::MULTI) {
-      for (i = 1; i <= ntypes; i++) {
+      for (i = 0; i < ncollections; i++) {
         cutghostmulti[i][0] *= length0;
         cutghostmulti[i][1] *= length1;
         cutghostmulti[i][2] *= length2;
@@ -434,7 +507,7 @@ void CommTiled::setup()
             sbox[5] = MIN(oboxhi[2],hi2[2]);
           }
 
-          for (int itype = 1; itype <= atom->ntypes; itype++) {
+          for (int icollection = 0; icollection < ncollections; icollection++) {
             sbox_multi[0] = sbox[0];
             sbox_multi[1] = sbox[1];
             sbox_multi[2] = sbox[2];
@@ -445,40 +518,37 @@ void CommTiled::setup()
               sbox_multi[idim] = sublo[idim];
               if (i < noverlap1)
                 sbox_multi[3+idim] =
-                  MIN(sbox_multi[3+idim]+cutghostmulti[itype][idim],subhi[idim]);
+                  MIN(sbox_multi[3+idim]+cutghostmulti[icollection][idim],subhi[idim]);
               else
                 sbox_multi[3+idim] =
-                  MIN(sbox_multi[3+idim]-prd[idim]+cutghostmulti[itype][idim],
-                      subhi[idim]);
+                  MIN(sbox_multi[3+idim]-prd[idim]+cutghostmulti[icollection][idim],subhi[idim]);
             } else {
               if (i < noverlap1)
                 sbox_multi[idim] =
-                  MAX(sbox_multi[idim]-cutghostmulti[itype][idim],sublo[idim]);
+                  MAX(sbox_multi[idim]-cutghostmulti[icollection][idim],sublo[idim]);
               else
                 sbox_multi[idim] =
-                  MAX(sbox_multi[idim]+prd[idim]-cutghostmulti[itype][idim],
-                      sublo[idim]);
+                  MAX(sbox_multi[idim]+prd[idim]-cutghostmulti[icollection][idim],sublo[idim]);
               sbox_multi[3+idim] = subhi[idim];
             }
 
             if (idim >= 1) {
               if (sbox_multi[0] == oboxlo[0])
-                sbox_multi[0] -= cutghostmulti[itype][idim];
+                sbox_multi[0] -= cutghostmulti[icollection][idim];
               if (sbox_multi[3] == oboxhi[0])
-                sbox_multi[3] += cutghostmulti[itype][idim];
+                sbox_multi[3] += cutghostmulti[icollection][idim];
             }
             if (idim == 2) {
               if (sbox_multi[1] == oboxlo[1])
-                sbox_multi[1] -= cutghostmulti[itype][idim];
+                sbox_multi[1] -= cutghostmulti[icollection][idim];
               if (sbox_multi[4] == oboxhi[1])
-                sbox_multi[4] += cutghostmulti[itype][idim];
+                sbox_multi[4] += cutghostmulti[icollection][idim];
             }
 
-            memcpy(sendbox_multi[iswap][i][itype],sbox_multi,6*sizeof(double));
+            memcpy(sendbox_multi[iswap][i][icollection],sbox_multi,6*sizeof(double));
           }
         }
       }
-
       iswap++;
     }
   }
@@ -496,7 +566,7 @@ void CommTiled::setup()
 
     // overlap = list of procs that touch my sub-box in idim
     // proc can appear twice in list if touches in both directions
-    // 2nd add-to-list checks to insure each proc appears exactly once
+    // 2nd add-to-list checks to ensure each proc appears exactly once
 
     noverlap = 0;
     iswap = 2*idim;
@@ -539,9 +609,9 @@ void CommTiled::setup()
 
     if (noverlap > nexchprocmax[idim]) {
       while (nexchprocmax[idim] < noverlap) nexchprocmax[idim] += DELTA_PROCS;
-      delete [] exchproc[idim];
+      delete[] exchproc[idim];
       exchproc[idim] = new int[nexchprocmax[idim]];
-      delete [] exchnum[idim];
+      delete[] exchnum[idim];
       exchnum[idim] = new int[nexchprocmax[idim]];
     }
 
@@ -565,7 +635,7 @@ void CommTiled::setup()
   for (i = 0; i < dimension; i++) nmax = MAX(nmax,nexchprocmax[i]);
   if (nmax > maxrequest) {
     maxrequest = nmax;
-    delete [] requests;
+    delete[] requests;
     requests = new MPI_Request[maxrequest];
   }
 }
@@ -607,8 +677,7 @@ void CommTiled::forward_comm(int /*dummy*/)
       }
       if (sendself[iswap]) {
         avec->pack_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                        x[firstrecv[iswap][nrecv]],pbc_flag[iswap][nsend],
-                        pbc[iswap][nsend]);
+                        x[firstrecv[iswap][nrecv]],pbc_flag[iswap][nsend],pbc[iswap][nsend]);
       }
       if (recvother[iswap]) MPI_Waitall(nrecv,requests,MPI_STATUS_IGNORE);
 
@@ -616,8 +685,7 @@ void CommTiled::forward_comm(int /*dummy*/)
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++)
           MPI_Irecv(&buf_recv[size_forward*forward_recv_offset[iswap][i]],
-                    size_forward_recv[iswap][i],
-                    MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                    size_forward_recv[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
       }
       if (sendother[iswap]) {
         for (i = 0; i < nsend; i++) {
@@ -629,15 +697,13 @@ void CommTiled::forward_comm(int /*dummy*/)
       if (sendself[iswap]) {
         avec->pack_comm_vel(sendnum[iswap][nsend],sendlist[iswap][nsend],
                             buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
-        avec->unpack_comm_vel(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                              buf_send);
+        avec->unpack_comm_vel(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
       }
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++) {
           MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
           avec->unpack_comm_vel(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                                &buf_recv[size_forward*
-                                          forward_recv_offset[iswap][irecv]]);
+                                &buf_recv[size_forward*forward_recv_offset[iswap][irecv]]);
         }
       }
 
@@ -645,8 +711,7 @@ void CommTiled::forward_comm(int /*dummy*/)
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++)
           MPI_Irecv(&buf_recv[size_forward*forward_recv_offset[iswap][i]],
-                    size_forward_recv[iswap][i],
-                    MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                    size_forward_recv[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
       }
       if (sendother[iswap]) {
         for (i = 0; i < nsend; i++) {
@@ -658,15 +723,13 @@ void CommTiled::forward_comm(int /*dummy*/)
       if (sendself[iswap]) {
         avec->pack_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
                         buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
-        avec->unpack_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                          buf_send);
+        avec->unpack_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
       }
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++) {
           MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
           avec->unpack_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                            &buf_recv[size_forward*
-                                      forward_recv_offset[iswap][irecv]]);
+                            &buf_recv[size_forward*forward_recv_offset[iswap][irecv]]);
         }
       }
     }
@@ -699,8 +762,7 @@ void CommTiled::reverse_comm()
       if (sendother[iswap]) {
         for (i = 0; i < nsend; i++) {
           MPI_Irecv(&buf_recv[size_reverse*reverse_recv_offset[iswap][i]],
-                    size_reverse_recv[iswap][i],MPI_DOUBLE,
-                    sendproc[iswap][i],0,world,&requests[i]);
+                    size_reverse_recv[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
         }
       }
       if (recvother[iswap]) {
@@ -716,8 +778,7 @@ void CommTiled::reverse_comm()
         for (i = 0; i < nsend; i++) {
           MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
           avec->unpack_reverse(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                               &buf_recv[size_reverse*
-                                         reverse_recv_offset[iswap][irecv]]);
+                               &buf_recv[size_reverse*reverse_recv_offset[iswap][irecv]]);
         }
       }
 
@@ -725,28 +786,23 @@ void CommTiled::reverse_comm()
       if (sendother[iswap]) {
         for (i = 0; i < nsend; i++)
           MPI_Irecv(&buf_recv[size_reverse*reverse_recv_offset[iswap][i]],
-                    size_reverse_recv[iswap][i],MPI_DOUBLE,
-                    sendproc[iswap][i],0,world,&requests[i]);
+                    size_reverse_recv[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
       }
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++) {
-          n = avec->pack_reverse(recvnum[iswap][i],firstrecv[iswap][i],
-                                 buf_send);
+          n = avec->pack_reverse(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
           MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
         }
       }
       if (sendself[iswap]) {
-        avec->pack_reverse(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                           buf_send);
-        avec->unpack_reverse(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                             buf_send);
+        avec->pack_reverse(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+        avec->unpack_reverse(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
       }
       if (sendother[iswap]) {
         for (i = 0; i < nsend; i++) {
           MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
           avec->unpack_reverse(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                               &buf_recv[size_reverse*
-                                         reverse_recv_offset[iswap][irecv]]);
+                               &buf_recv[size_reverse*reverse_recv_offset[iswap][irecv]]);
         }
       }
     }
@@ -781,13 +837,15 @@ void CommTiled::exchange()
   atom->nghost = 0;
   atom->avec->clear_bonus();
 
-  // insure send buf has extra space for a single atom
+  // ensure send buf has extra space for a single atom
   // only need to reset if a fix can dynamically add to size of single atom
 
   if (maxexchange_fix_dynamic) {
-    int bufextra_old = bufextra;
     init_exchange();
-    if (bufextra > bufextra_old) grow_send(maxsend+bufextra,2);
+    if (bufextra > bufextra_max) {
+      grow_send(maxsend+bufextra,2);
+      bufextra = bufextra_max;
+    }
   }
 
   // domain properties used in exchange method and methods it calls
@@ -849,8 +907,7 @@ void CommTiled::exchange()
     if (!nexch) continue;
 
     for (m = 0; m < nexch; m++)
-      MPI_Irecv(&exchnum[dim][m],1,MPI_INT,
-                exchproc[dim][m],0,world,&requests[m]);
+      MPI_Irecv(&exchnum[dim][m],1,MPI_INT,exchproc[dim][m],0,world,&requests[m]);
     for (m = 0; m < nexch; m++)
       MPI_Send(&nsend,1,MPI_INT,exchproc[dim][m],0,world);
     MPI_Waitall(nexch,requests,MPI_STATUS_IGNORE);
@@ -861,8 +918,7 @@ void CommTiled::exchange()
 
     offset = 0;
     for (m = 0; m < nexch; m++) {
-      MPI_Irecv(&buf_recv[offset],exchnum[dim][m],
-                MPI_DOUBLE,exchproc[dim][m],0,world,&requests[m]);
+      MPI_Irecv(&buf_recv[offset],exchnum[dim][m],MPI_DOUBLE,exchproc[dim][m],0,world,&requests[m]);
       offset += exchnum[dim][m];
     }
     for (m = 0; m < nexch; m++)
@@ -906,11 +962,14 @@ void CommTiled::exchange()
 
 void CommTiled::borders()
 {
-  int i,m,n,nlast,nsend,nrecv,ngroup,ncount,ncountall;
+  int i,m,n,nlast,nsend,nrecv,ngroup,nprior,ncount,ncountall;
   double xlo,xhi,ylo,yhi,zlo,zhi;
   double *bbox;
   double **x;
   AtomVec *avec = atom->avec;
+
+  // After exchanging, need to reconstruct collection array for border communication
+  if (mode == Comm::MULTI) neighbor->build_collection(0);
 
   // send/recv max one = max # of atoms in single send/recv for any swap
   // send/recv max all = max # of atoms in all sends/recvs within any swap
@@ -977,16 +1036,16 @@ void CommTiled::borders()
         smaxone = MAX(smaxone,ncount);
         ncountall += ncount;
 
-      } else {
+      } else if (mode == Comm::MULTI) {
 
-        int* type=atom->type;
-        int itype;
+        int* collection=neighbor->collection;
+        int icollection;
         ncount = 0;
 
         if (!bordergroup) {
           for (i = 0; i < nlast; i++) {
-            itype=type[i];
-            bbox = sendbox_multi[iswap][m][itype];
+            icollection=collection[i];
+            bbox = sendbox_multi[iswap][m][icollection];
             xlo = bbox[0]; ylo = bbox[1]; zlo = bbox[2];
             xhi = bbox[3]; yhi = bbox[4]; zhi = bbox[5];
             if (x[i][0] >= xlo && x[i][0] < xhi &&
@@ -999,8 +1058,8 @@ void CommTiled::borders()
         } else {
           ngroup = atom->nfirst;
           for (i = 0; i < ngroup; i++) {
-            itype=type[i];
-            bbox = sendbox_multi[iswap][m][itype];
+            icollection=collection[i];
+            bbox = sendbox_multi[iswap][m][icollection];
             xlo = bbox[0]; ylo = bbox[1]; zlo = bbox[2];
             xhi = bbox[3]; yhi = bbox[4]; zhi = bbox[5];
             if (x[i][0] >= xlo && x[i][0] < xhi &&
@@ -1011,8 +1070,8 @@ void CommTiled::borders()
             }
           }
           for (i = atom->nlocal; i < nlast; i++) {
-            itype=type[i];
-            bbox = sendbox_multi[iswap][m][itype];
+            icollection=collection[i];
+            bbox = sendbox_multi[iswap][m][icollection];
             xlo = bbox[0]; ylo = bbox[1]; zlo = bbox[2];
             xhi = bbox[3]; yhi = bbox[4]; zhi = bbox[5];
             if (x[i][0] >= xlo && x[i][0] < xhi &&
@@ -1040,8 +1099,7 @@ void CommTiled::borders()
 
     if (recvother[iswap])
       for (m = 0; m < nrecv; m++)
-        MPI_Irecv(&recvnum[iswap][m],1,MPI_INT,
-                  recvproc[iswap][m],0,world,&requests[m]);
+        MPI_Irecv(&recvnum[iswap][m],1,MPI_INT,recvproc[iswap][m],0,world,&requests[m]);
     if (sendother[iswap])
       for (m = 0; m < nsend; m++)
         MPI_Send(&sendnum[iswap][m],1,MPI_INT,sendproc[iswap][m],0,world);
@@ -1076,7 +1134,7 @@ void CommTiled::borders()
     }
     rmaxall = MAX(rmaxall,ncountall);
 
-    // insure send/recv buffers are large enough for this border comm swap
+    // ensure send/recv buffers are large enough for this border comm swap
 
     if (smaxone*size_border > maxsend) grow_send(smaxone*size_border,0);
     if (rmaxall*size_border > maxrecv) grow_recv(rmaxall*size_border);
@@ -1101,17 +1159,14 @@ void CommTiled::borders()
       }
       if (sendself[iswap]) {
         avec->pack_border_vel(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                              buf_send,pbc_flag[iswap][nsend],
-                              pbc[iswap][nsend]);
-        avec->unpack_border_vel(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                                buf_send);
+                              buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
+        avec->unpack_border_vel(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
       }
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++) {
           MPI_Waitany(nrecv,requests,&m,MPI_STATUS_IGNORE);
           avec->unpack_border_vel(recvnum[iswap][m],firstrecv[iswap][m],
-                                  &buf_recv[size_border*
-                                            forward_recv_offset[iswap][m]]);
+                                  &buf_recv[size_border*forward_recv_offset[iswap][m]]);
         }
       }
 
@@ -1132,15 +1187,13 @@ void CommTiled::borders()
       if (sendself[iswap]) {
         avec->pack_border(sendnum[iswap][nsend],sendlist[iswap][nsend],
                           buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
-        avec->unpack_border(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                            buf_send);
+        avec->unpack_border(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
       }
       if (recvother[iswap]) {
         for (i = 0; i < nrecv; i++) {
           MPI_Waitany(nrecv,requests,&m,MPI_STATUS_IGNORE);
           avec->unpack_border(recvnum[iswap][m],firstrecv[iswap][m],
-                              &buf_recv[size_border*
-                                        forward_recv_offset[iswap][m]]);
+                              &buf_recv[size_border*forward_recv_offset[iswap][m]]);
         }
       }
     }
@@ -1148,19 +1201,20 @@ void CommTiled::borders()
     // increment ghost atoms
 
     n = nrecvproc[iswap];
-    if (n)
+    if (n) {
+      nprior = atom->nghost + atom->nlocal;
       atom->nghost += forward_recv_offset[iswap][n-1] + recvnum[iswap][n-1];
+      if (neighbor->style == Neighbor::MULTI) neighbor->build_collection(nprior);
+    }
   }
 
   // For molecular systems we lose some bits for local atom indices due
   // to encoding of special pairs in neighbor lists. Check for overflows.
 
-  if ((atom->molecular != Atom::ATOMIC)
-      && ((atom->nlocal + atom->nghost) > NEIGHMASK))
-    error->one(FLERR,"Per-processor number of atoms is too large for "
-               "molecular neighbor lists");
+  if ((atom->molecular != Atom::ATOMIC) && ((atom->nlocal + atom->nghost) > NEIGHMASK))
+    error->one(FLERR,"Per-processor number of atoms is too large for molecular neighbor lists");
 
-  // insure send/recv buffers are long enough for all forward & reverse comm
+  // ensure send/recv buffers are long enough for all forward & reverse comm
   // send buf is for one forward or reverse sends to one proc
   // recv buf is for all forward or reverse recvs in one swap
 
@@ -1176,14 +1230,19 @@ void CommTiled::borders()
 
 /* ----------------------------------------------------------------------
    forward communication invoked by a Pair
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_forward from Pair
+   size > 0 -> Pair passes max size per atom
+   the latter is only useful if Pair does several comm modes,
+     some are smaller than max stored in its comm_forward
 ------------------------------------------------------------------------- */
 
-void CommTiled::forward_comm_pair(Pair *pair)
+void CommTiled::forward_comm(Pair *pair, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = pair->comm_forward;
+  if (size) nsize = size;
+  else nsize = pair->comm_forward;
 
   for (int iswap = 0; iswap < nswap; iswap++) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1192,8 +1251,7 @@ void CommTiled::forward_comm_pair(Pair *pair)
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++)
         MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
-                  nsize*recvnum[iswap][i],
-                  MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
     }
 
     if (sendother[iswap]) {
@@ -1206,17 +1264,14 @@ void CommTiled::forward_comm_pair(Pair *pair)
 
     if (sendself[iswap]) {
       pair->pack_forward_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                              buf_send,pbc_flag[iswap][nsend],
-                              pbc[iswap][nsend]);
-      pair->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                                buf_send);
+                              buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
+      pair->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
         MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
         pair->unpack_forward_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                                  &buf_recv[nsize*
-                                            forward_recv_offset[iswap][irecv]]);
+                                  &buf_recv[nsize*forward_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1224,14 +1279,19 @@ void CommTiled::forward_comm_pair(Pair *pair)
 
 /* ----------------------------------------------------------------------
    reverse communication invoked by a Pair
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_reverse from Fix
+   size > 0 -> Fix passes max size per atom
+   the latter is only useful if Fix does several comm modes,
+     some are smaller than max stored in its comm_reverse
 ------------------------------------------------------------------------- */
 
-void CommTiled::reverse_comm_pair(Pair *pair)
+void CommTiled::reverse_comm(Pair *pair, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = MAX(pair->comm_reverse,pair->comm_reverse_off);
+  if (size) nsize = MAX(pair->comm_reverse, pair->comm_reverse_off);
+  else nsize = pair->comm_reverse;
 
   for (int iswap = nswap-1; iswap >= 0; iswap--) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1240,28 +1300,116 @@ void CommTiled::reverse_comm_pair(Pair *pair)
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++)
         MPI_Irecv(&buf_recv[nsize*reverse_recv_offset[iswap][i]],
-                  nsize*sendnum[iswap][i],MPI_DOUBLE,
-                  sendproc[iswap][i],0,world,&requests[i]);
+                  nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
-        n = pair->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],
-                                    buf_send);
+        n = pair->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
         MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
-      pair->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                              buf_send);
-      pair->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                                buf_send);
+      pair->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+      pair->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
         pair->unpack_reverse_comm(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                                  &buf_recv[nsize*
-                                            reverse_recv_offset[iswap][irecv]]);
+                                  &buf_recv[nsize*reverse_recv_offset[iswap][irecv]]);
+      }
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
+   forward communication invoked by a Bond
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_forward from Bond
+   size > 0 -> Bond passes max size per atom
+   the latter is only useful if Bond does several comm modes,
+     some are smaller than max stored in its comm_forward
+------------------------------------------------------------------------- */
+void CommTiled::forward_comm(Bond *bond, int size)
+{
+  int i,irecv,n,nsize,nsend,nrecv;
+
+  if (size) nsize = size;
+  else nsize = bond->comm_forward;
+
+  for (int iswap = 0; iswap < nswap; iswap++) {
+    nsend = nsendproc[iswap] - sendself[iswap];
+    nrecv = nrecvproc[iswap] - sendself[iswap];
+
+    if (recvother[iswap]) {
+      for (i = 0; i < nrecv; i++)
+        MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+    }
+
+    if (sendother[iswap]) {
+      for (i = 0; i < nsend; i++) {
+        n = bond->pack_forward_comm(sendnum[iswap][i],sendlist[iswap][i],
+                                    buf_send,pbc_flag[iswap][i],pbc[iswap][i]);
+        MPI_Send(buf_send,n,MPI_DOUBLE,sendproc[iswap][i],0,world);
+      }
+    }
+
+    if (sendself[iswap]) {
+      bond->pack_forward_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
+                              buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
+      bond->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+    }
+    if (recvother[iswap]) {
+      for (i = 0; i < nrecv; i++) {
+        MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
+        bond->unpack_forward_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
+                                  &buf_recv[nsize*forward_recv_offset[iswap][irecv]]);
+      }
+    }
+  }
+}
+
+/* ----------------------------------------------------------------------
+   reverse communication invoked by a Bond
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_reverse from Bond
+   size > 0 -> Bond passes max size per atom
+   the latter is only useful if Bond does several comm modes,
+     some are smaller than max stored in its comm_reverse
+------------------------------------------------------------------------- */
+
+void CommTiled::reverse_comm(Bond *bond, int size)
+{
+  int i,irecv,n,nsize,nsend,nrecv;
+
+  if (size) nsize = size;
+  else nsize = MAX(bond->comm_reverse,bond->comm_reverse_off);
+
+  for (int iswap = nswap-1; iswap >= 0; iswap--) {
+    nsend = nsendproc[iswap] - sendself[iswap];
+    nrecv = nrecvproc[iswap] - sendself[iswap];
+
+    if (sendother[iswap]) {
+      for (i = 0; i < nsend; i++)
+        MPI_Irecv(&buf_recv[nsize*reverse_recv_offset[iswap][i]],
+                  nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
+    }
+    if (recvother[iswap]) {
+      for (i = 0; i < nrecv; i++) {
+        n = bond->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
+        MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
+      }
+    }
+    if (sendself[iswap]) {
+      bond->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+      bond->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
+    }
+    if (sendother[iswap]) {
+      for (i = 0; i < nsend; i++) {
+        MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
+        bond->unpack_reverse_comm(sendnum[iswap][irecv],sendlist[iswap][irecv],
+                                  &buf_recv[nsize*reverse_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1276,7 +1424,7 @@ void CommTiled::reverse_comm_pair(Pair *pair)
      some are smaller than max stored in its comm_forward
 ------------------------------------------------------------------------- */
 
-void CommTiled::forward_comm_fix(Fix *fix, int size)
+void CommTiled::forward_comm(Fix *fix, int size)
 {
   int i,irecv,n,nsize,nsend,nrecv;
 
@@ -1290,8 +1438,7 @@ void CommTiled::forward_comm_fix(Fix *fix, int size)
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++)
         MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
-                  nsize*recvnum[iswap][i],
-                  MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
@@ -1302,17 +1449,14 @@ void CommTiled::forward_comm_fix(Fix *fix, int size)
     }
     if (sendself[iswap]) {
       fix->pack_forward_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                             buf_send,pbc_flag[iswap][nsend],
-                             pbc[iswap][nsend]);
-      fix->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                               buf_send);
+                             buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
+      fix->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
         MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
         fix->unpack_forward_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                                 &buf_recv[nsize*
-                                           forward_recv_offset[iswap][irecv]]);
+                                 &buf_recv[nsize*forward_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1321,13 +1465,13 @@ void CommTiled::forward_comm_fix(Fix *fix, int size)
 /* ----------------------------------------------------------------------
    reverse communication invoked by a Fix
    size/nsize used only to set recv buffer limit
-   size = 0 (default) -> use comm_forward from Fix
+   size = 0 (default) -> use comm_reverse from Fix
    size > 0 -> Fix passes max size per atom
    the latter is only useful if Fix does several comm modes,
-     some are smaller than max stored in its comm_forward
+     some are smaller than max stored in its comm_reverse
 ------------------------------------------------------------------------- */
 
-void CommTiled::reverse_comm_fix(Fix *fix, int size)
+void CommTiled::reverse_comm(Fix *fix, int size)
 {
   int i,irecv,n,nsize,nsend,nrecv;
 
@@ -1341,28 +1485,23 @@ void CommTiled::reverse_comm_fix(Fix *fix, int size)
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++)
         MPI_Irecv(&buf_recv[nsize*reverse_recv_offset[iswap][i]],
-                  nsize*sendnum[iswap][i],MPI_DOUBLE,
-                  sendproc[iswap][i],0,world,&requests[i]);
+                  nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
-        n = fix->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],
-                                   buf_send);
+        n = fix->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
         MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
-      fix->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                             buf_send);
-      fix->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                               buf_send);
+      fix->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+      fix->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
         fix->unpack_reverse_comm(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                                 &buf_recv[nsize*
-                                           reverse_recv_offset[iswap][irecv]]);
+                                 &buf_recv[nsize*reverse_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1370,26 +1509,31 @@ void CommTiled::reverse_comm_fix(Fix *fix, int size)
 
 /* ----------------------------------------------------------------------
    reverse communication invoked by a Fix with variable size data
-   query fix for all pack sizes to insure buf_send is big enough
-   handshake sizes before irregular comm to insure buf_recv is big enough
+   query fix for all pack sizes to ensure buf_send is big enough
+   handshake sizes before irregular comm to ensure buf_recv is big enough
    NOTE: how to setup one big buf recv with correct offsets ??
 ------------------------------------------------------------------------- */
 
-void CommTiled::reverse_comm_fix_variable(Fix * /*fix*/)
+void CommTiled::reverse_comm_variable(Fix * /*fix*/)
 {
   error->all(FLERR,"Reverse comm fix variable not yet supported by CommTiled");
 }
 
 /* ----------------------------------------------------------------------
    forward communication invoked by a Compute
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_forward from Compute
+   size > 0 -> Compute passes max size per atom
+   the latter is only useful if Compute does several comm modes,
+     some are smaller than max stored in its comm_forward
 ------------------------------------------------------------------------- */
 
-void CommTiled::forward_comm_compute(Compute *compute)
+void CommTiled::forward_comm(Compute *compute, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = compute->comm_forward;
+  if (size) nsize = size;
+  else nsize = compute->comm_forward;
 
   for (int iswap = 0; iswap < nswap; iswap++) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1398,31 +1542,26 @@ void CommTiled::forward_comm_compute(Compute *compute)
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++)
         MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
-                  nsize*recvnum[iswap][i],
-                  MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         n = compute->pack_forward_comm(sendnum[iswap][i],sendlist[iswap][i],
-                                       buf_send,pbc_flag[iswap][i],
-                                       pbc[iswap][i]);
+                                       buf_send,pbc_flag[iswap][i],pbc[iswap][i]);
         MPI_Send(buf_send,n,MPI_DOUBLE,sendproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
       compute->pack_forward_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                                 buf_send,pbc_flag[iswap][nsend],
-                                 pbc[iswap][nsend]);
-      compute->unpack_forward_comm(recvnum[iswap][nrecv],
-                                   firstrecv[iswap][nrecv],buf_send);
+                                 buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
+      compute->unpack_forward_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
         MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
         compute->
           unpack_forward_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                              &buf_recv[nsize*
-                                        forward_recv_offset[iswap][irecv]]);
+                              &buf_recv[nsize*forward_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1430,14 +1569,19 @@ void CommTiled::forward_comm_compute(Compute *compute)
 
 /* ----------------------------------------------------------------------
    reverse communication invoked by a Compute
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_reverse from Compute
+   size > 0 -> Compute passes max size per atom
+   the latter is only useful if Compute does several comm modes,
+     some are smaller than max stored in its comm_reverse
 ------------------------------------------------------------------------- */
 
-void CommTiled::reverse_comm_compute(Compute *compute)
+void CommTiled::reverse_comm(Compute *compute, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = compute->comm_reverse;
+  if (size) nsize = size;
+  else nsize = compute->comm_reverse;
 
   for (int iswap = nswap-1; iswap >= 0; iswap--) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1446,29 +1590,24 @@ void CommTiled::reverse_comm_compute(Compute *compute)
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++)
         MPI_Irecv(&buf_recv[nsize*reverse_recv_offset[iswap][i]],
-                  nsize*sendnum[iswap][i],MPI_DOUBLE,
-                  sendproc[iswap][i],0,world,&requests[i]);
+                  nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
-        n = compute->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],
-                                       buf_send);
+        n = compute->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
         MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
-      compute->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                                 buf_send);
-      compute->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                                   buf_send);
+      compute->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+      compute->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
         compute->
           unpack_reverse_comm(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                              &buf_recv[nsize*
-                                        reverse_recv_offset[iswap][irecv]]);
+                              &buf_recv[nsize*reverse_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1476,14 +1615,19 @@ void CommTiled::reverse_comm_compute(Compute *compute)
 
 /* ----------------------------------------------------------------------
    forward communication invoked by a Dump
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_forward from Dump
+   size > 0 -> Dump passes max size per atom
+   the latter is only useful if Dump does several comm modes,
+     some are smaller than max stored in its comm_forward
 ------------------------------------------------------------------------- */
 
-void CommTiled::forward_comm_dump(Dump *dump)
+void CommTiled::forward_comm(Dump *dump, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = dump->comm_forward;
+  if (size) nsize = size;
+  else nsize = dump->comm_forward;
 
   for (int iswap = 0; iswap < nswap; iswap++) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1492,21 +1636,18 @@ void CommTiled::forward_comm_dump(Dump *dump)
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++)
         MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
-                  nsize*recvnum[iswap][i],
-                  MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         n = dump->pack_forward_comm(sendnum[iswap][i],sendlist[iswap][i],
-                                    buf_send,pbc_flag[iswap][i],
-                                    pbc[iswap][i]);
+                                    buf_send,pbc_flag[iswap][i],pbc[iswap][i]);
         MPI_Send(buf_send,n,MPI_DOUBLE,sendproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
       dump->pack_forward_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                              buf_send,pbc_flag[iswap][nsend],
-                              pbc[iswap][nsend]);
+                              buf_send,pbc_flag[iswap][nsend],pbc[iswap][nsend]);
       dump->unpack_forward_comm(recvnum[iswap][nrecv],
                                 firstrecv[iswap][nrecv],buf_send);
     }
@@ -1514,8 +1655,7 @@ void CommTiled::forward_comm_dump(Dump *dump)
       for (i = 0; i < nrecv; i++) {
         MPI_Waitany(nrecv,requests,&irecv,MPI_STATUS_IGNORE);
         dump->unpack_forward_comm(recvnum[iswap][irecv],firstrecv[iswap][irecv],
-                                  &buf_recv[nsize*
-                                            forward_recv_offset[iswap][irecv]]);
+                                  &buf_recv[nsize*forward_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1523,14 +1663,19 @@ void CommTiled::forward_comm_dump(Dump *dump)
 
 /* ----------------------------------------------------------------------
    reverse communication invoked by a Dump
-   nsize used only to set recv buffer limit
+   size/nsize used only to set recv buffer limit
+   size = 0 (default) -> use comm_reverse from Dump
+   size > 0 -> Dump passes max size per atom
+   the latter is only useful if Dump does several comm modes,
+     some are smaller than max stored in its comm_reverse
 ------------------------------------------------------------------------- */
 
-void CommTiled::reverse_comm_dump(Dump *dump)
+void CommTiled::reverse_comm(Dump *dump, int size)
 {
-  int i,irecv,n,nsend,nrecv;
+  int i,irecv,n,nsize,nsend,nrecv;
 
-  int nsize = dump->comm_reverse;
+  if (size) nsize = size;
+  else nsize = dump->comm_reverse;
 
   for (int iswap = nswap-1; iswap >= 0; iswap--) {
     nsend = nsendproc[iswap] - sendself[iswap];
@@ -1539,28 +1684,23 @@ void CommTiled::reverse_comm_dump(Dump *dump)
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++)
         MPI_Irecv(&buf_recv[nsize*reverse_recv_offset[iswap][i]],
-                  nsize*sendnum[iswap][i],MPI_DOUBLE,
-                  sendproc[iswap][i],0,world,&requests[i]);
+                  nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world,&requests[i]);
     }
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++) {
-        n = dump->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],
-                                    buf_send);
+        n = dump->pack_reverse_comm(recvnum[iswap][i],firstrecv[iswap][i],buf_send);
         MPI_Send(buf_send,n,MPI_DOUBLE,recvproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
-      dump->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],
-                              buf_send);
-      dump->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],
-                                buf_send);
+      dump->pack_reverse_comm(recvnum[iswap][nrecv],firstrecv[iswap][nrecv],buf_send);
+      dump->unpack_reverse_comm(sendnum[iswap][nsend],sendlist[iswap][nsend],buf_send);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
         MPI_Waitany(nsend,requests,&irecv,MPI_STATUS_IGNORE);
         dump->unpack_reverse_comm(sendnum[iswap][irecv],sendlist[iswap][irecv],
-                                  &buf_recv[nsize*
-                                            reverse_recv_offset[iswap][irecv]]);
+                                  &buf_recv[nsize*reverse_recv_offset[iswap][irecv]]);
       }
     }
   }
@@ -1574,7 +1714,7 @@ void CommTiled::forward_comm_array(int nsize, double **array)
 {
   int i,j,k,m,iatom,last,irecv,nsend,nrecv;
 
-  // insure send/recv bufs are big enough for nsize
+  // ensure send/recv bufs are big enough for nsize
   // based on smaxone/rmaxall from most recent borders() invocation
 
   if (nsize > maxforward) {
@@ -1592,8 +1732,7 @@ void CommTiled::forward_comm_array(int nsize, double **array)
     if (recvother[iswap]) {
       for (i = 0; i < nrecv; i++)
         MPI_Irecv(&buf_recv[nsize*forward_recv_offset[iswap][i]],
-                  nsize*recvnum[iswap][i],
-                  MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
+                  nsize*recvnum[iswap][i],MPI_DOUBLE,recvproc[iswap][i],0,world,&requests[i]);
     }
     if (sendother[iswap]) {
       for (i = 0; i < nsend; i++) {
@@ -1603,8 +1742,7 @@ void CommTiled::forward_comm_array(int nsize, double **array)
           for (k = 0; k < nsize; k++)
             buf_send[m++] = array[j][k];
         }
-        MPI_Send(buf_send,nsize*sendnum[iswap][i],
-                 MPI_DOUBLE,sendproc[iswap][i],0,world);
+        MPI_Send(buf_send,nsize*sendnum[iswap][i],MPI_DOUBLE,sendproc[iswap][i],0,world);
       }
     }
     if (sendself[iswap]) {
@@ -1632,17 +1770,6 @@ void CommTiled::forward_comm_array(int nsize, double **array)
       }
     }
   }
-}
-
-/* ----------------------------------------------------------------------
-   exchange info provided with all 6 stencil neighbors
-   NOTE: this method is currently not used
-------------------------------------------------------------------------- */
-
-int CommTiled::exchange_variable(int n, double * /*inbuf*/, double *& /*outbuf*/)
-{
-  int nrecv = n;
-  return nrecv;
 }
 
 /* ----------------------------------------------------------------------
@@ -1688,7 +1815,7 @@ void CommTiled::box_drop_brick(int idim, double *lo, double *hi, int &indexme)
   if (index < 0 || index > procgrid[idim])
     error->one(FLERR,"Comm tiled invalid index in box drop brick");
 
-  while (1) {
+  while (true) {
     lower = boxlo[idim] + prd[idim]*split[index];
     if (index < procgrid[idim]-1)
       upper = boxlo[idim] + prd[idim]*split[index+1];
@@ -1723,8 +1850,7 @@ void CommTiled::box_drop_tiled(int /*idim*/, double *lo, double *hi, int &indexm
   box_drop_tiled_recurse(lo,hi,0,nprocs-1,indexme);
 }
 
-void CommTiled::box_drop_tiled_recurse(double *lo, double *hi,
-                                       int proclower, int procupper,
+void CommTiled::box_drop_tiled_recurse(double *lo, double *hi, int proclower, int procupper,
                                        int &indexme)
 {
   // end recursion when partition is a single proc
@@ -1762,8 +1888,7 @@ void CommTiled::box_drop_tiled_recurse(double *lo, double *hi,
    return other box owned by proc as lo/hi corner pts
 ------------------------------------------------------------------------- */
 
-void CommTiled::box_other_brick(int idim, int idir,
-                                int proc, double *lo, double *hi)
+void CommTiled::box_other_brick(int idim, int idir, int proc, double *lo, double *hi)
 {
   lo[0] = sublo[0]; lo[1] = sublo[1]; lo[2] = sublo[2];
   hi[0] = subhi[0]; hi[1] = subhi[1]; hi[2] = subhi[2];
@@ -1810,8 +1935,7 @@ void CommTiled::box_other_brick(int idim, int idir,
    return other box owned by proc as lo/hi corner pts
 ------------------------------------------------------------------------- */
 
-void CommTiled::box_other_tiled(int /*idim*/, int /*idir*/,
-                                int proc, double *lo, double *hi)
+void CommTiled::box_other_tiled(int /*idim*/, int /*idir*/, int proc, double *lo, double *hi)
 {
   double (*split)[2] = rcbinfo[proc].mysplit;
 
@@ -1940,8 +2064,7 @@ int CommTiled::point_drop_tiled(int idim, double *x)
    recursive point drop thru RCB tree
 ------------------------------------------------------------------------- */
 
-int CommTiled::point_drop_tiled_recurse(double *x,
-                                        int proclower, int procupper)
+int CommTiled::point_drop_tiled_recurse(double *x, int proclower, int procupper)
 {
   // end recursion when partition is a single proc
   // return proc
@@ -1999,8 +2122,7 @@ void CommTiled::coord2proc_setup()
   memcpy(&rcbone.mysplit[0][0],&mysplit[0][0],6*sizeof(double));
   rcbone.cutfrac = rcbcutfrac;
   rcbone.dim = rcbcutdim;
-  MPI_Allgather(&rcbone,sizeof(RCBinfo),MPI_CHAR,
-                rcbinfo,sizeof(RCBinfo),MPI_CHAR,world);
+  MPI_Allgather(&rcbone,sizeof(RCBinfo),MPI_CHAR,rcbinfo,sizeof(RCBinfo),MPI_CHAR,world);
 }
 
 /* ----------------------------------------------------------------------
@@ -2040,12 +2162,15 @@ void CommTiled::grow_send(int n, int flag)
 }
 
 /* ----------------------------------------------------------------------
-   free/malloc the size of the recv buffer as needed with BUFFACTOR
+   free/malloc the size of the recv buffer as needed
+   flag = 0, realloc with BUFFACTOR
+   flag = 1, free/malloc w/out BUFFACTOR
 ------------------------------------------------------------------------- */
 
-void CommTiled::grow_recv(int n)
+void CommTiled::grow_recv(int n, int flag)
 {
-  maxrecv = static_cast<int> (BUFFACTOR * n);
+  if (flag) maxrecv = n;
+  else maxrecv = static_cast<int> (BUFFACTOR * n);
   memory->destroy(buf_recv);
   memory->create(buf_recv,maxrecv,"comm:buf_recv");
 }
@@ -2135,30 +2260,29 @@ void CommTiled::allocate_swap(int n)
 
 void CommTiled::grow_swap_send(int i, int n, int nold)
 {
-  delete [] sendproc[i];
+  delete[] sendproc[i];
   sendproc[i] = new int[n];
-  delete [] sendnum[i];
+  delete[] sendnum[i];
   sendnum[i] = new int[n];
 
-  delete [] size_reverse_recv[i];
+  delete[] size_reverse_recv[i];
   size_reverse_recv[i] = new int[n];
-  delete [] reverse_recv_offset[i];
+  delete[] reverse_recv_offset[i];
   reverse_recv_offset[i] = new int[n];
 
-  delete [] pbc_flag[i];
+  delete[] pbc_flag[i];
   pbc_flag[i] = new int[n];
   memory->destroy(pbc[i]);
   memory->create(pbc[i],n,6,"comm:pbc_flag");
   memory->destroy(sendbox[i]);
   memory->create(sendbox[i],n,6,"comm:sendbox");
-  memory->destroy(sendbox_multi[i]);
-  memory->create(sendbox_multi[i],n,atom->ntypes+1,6,"comm:sendbox_multi");
+  grow_swap_send_multi(i,n);
 
-  delete [] maxsendlist[i];
+  delete[] maxsendlist[i];
   maxsendlist[i] = new int[n];
 
   for (int j = 0; j < nold; j++) memory->destroy(sendlist[i][j]);
-  delete [] sendlist[i];
+  delete[] sendlist[i];
   sendlist[i] = new int*[n];
   for (int j = 0; j < n; j++) {
     maxsendlist[i][j] = BUFMIN;
@@ -2168,20 +2292,33 @@ void CommTiled::grow_swap_send(int i, int n, int nold)
 
 void CommTiled::grow_swap_recv(int i, int n)
 {
-  delete [] recvproc[i];
+  delete[] recvproc[i];
   recvproc[i] = new int[n];
-  delete [] recvnum[i];
+  delete[] recvnum[i];
   recvnum[i] = new int[n];
 
-  delete [] size_forward_recv[i];
+  delete[] size_forward_recv[i];
   size_forward_recv[i] = new int[n];
-  delete [] firstrecv[i];
+  delete[] firstrecv[i];
   firstrecv[i] = new int[n];
-  delete [] forward_recv_offset[i];
+  delete[] forward_recv_offset[i];
   forward_recv_offset[i] = new int[n];
 
-  delete [] size_reverse_send[i];
+  delete[] size_reverse_send[i];
   size_reverse_send[i] = new int[n];
+}
+
+
+/* ----------------------------------------------------------------------
+   grow info for swap I for multi as ncollections can change
+------------------------------------------------------------------------- */
+
+void CommTiled::grow_swap_send_multi(int i, int n)
+{
+  memory->destroy(sendbox_multi[i]);
+
+  if (ncollections > 0)
+    memory->create(sendbox_multi[i],n,ncollections,6,"comm:sendbox_multi");
 }
 
 /* ----------------------------------------------------------------------
@@ -2190,67 +2327,70 @@ void CommTiled::grow_swap_recv(int i, int n)
 
 void CommTiled::deallocate_swap(int n)
 {
-  delete [] nsendproc;
-  delete [] nrecvproc;
-  delete [] sendother;
-  delete [] recvother;
-  delete [] sendself;
+  delete[] nsendproc;
+  delete[] nrecvproc;
+  delete[] sendother;
+  delete[] recvother;
+  delete[] sendself;
 
   for (int i = 0; i < n; i++) {
-    delete [] sendproc[i];
-    delete [] recvproc[i];
-    delete [] sendnum[i];
-    delete [] recvnum[i];
-    delete [] size_forward_recv[i];
-    delete [] firstrecv[i];
-    delete [] size_reverse_send[i];
-    delete [] size_reverse_recv[i];
-    delete [] forward_recv_offset[i];
-    delete [] reverse_recv_offset[i];
+    delete[] sendproc[i];
+    delete[] recvproc[i];
+    delete[] sendnum[i];
+    delete[] recvnum[i];
+    delete[] size_forward_recv[i];
+    delete[] firstrecv[i];
+    delete[] size_reverse_send[i];
+    delete[] size_reverse_recv[i];
+    delete[] forward_recv_offset[i];
+    delete[] reverse_recv_offset[i];
 
-    delete [] pbc_flag[i];
+    delete[] pbc_flag[i];
     memory->destroy(pbc[i]);
     memory->destroy(sendbox[i]);
     memory->destroy(sendbox_multi[i]);
 
-    delete [] maxsendlist[i];
+    if (maxsendlist)
+      delete[] maxsendlist[i];
 
-    for (int j = 0; j < nprocmax[i]; j++) memory->destroy(sendlist[i][j]);
-    delete [] sendlist[i];
+    if (sendlist && sendlist[i]) {
+      for (int j = 0; j < nprocmax[i]; j++) memory->destroy(sendlist[i][j]);
+      delete[] sendlist[i];
+    }
   }
 
-  delete [] sendproc;
-  delete [] recvproc;
-  delete [] sendnum;
-  delete [] recvnum;
-  delete [] size_forward_recv;
-  delete [] firstrecv;
-  delete [] size_reverse_send;
-  delete [] size_reverse_recv;
-  delete [] forward_recv_offset;
-  delete [] reverse_recv_offset;
+  delete[] sendproc;
+  delete[] recvproc;
+  delete[] sendnum;
+  delete[] recvnum;
+  delete[] size_forward_recv;
+  delete[] firstrecv;
+  delete[] size_reverse_send;
+  delete[] size_reverse_recv;
+  delete[] forward_recv_offset;
+  delete[] reverse_recv_offset;
 
-  delete [] pbc_flag;
-  delete [] pbc;
-  delete [] sendbox;
-  delete [] sendbox_multi;
-  delete [] maxsendlist;
-  delete [] sendlist;
+  delete[] pbc_flag;
+  delete[] pbc;
+  delete[] sendbox;
+  delete[] sendbox_multi;
+  delete[] maxsendlist;
+  delete[] sendlist;
 
-  delete [] requests;
+  delete[] requests;
 
-  delete [] nprocmax;
+  delete[] nprocmax;
 
-  delete [] nexchproc;
-  delete [] nexchprocmax;
+  delete[] nexchproc;
+  delete[] nexchprocmax;
 
   for (int i = 0; i < n/2; i++) {
-    delete [] exchproc[i];
-    delete [] exchnum[i];
+    delete[] exchproc[i];
+    delete[] exchnum[i];
   }
 
-  delete [] exchproc;
-  delete [] exchnum;
+  delete[] exchproc;
+  delete[] exchnum;
 }
 
 /* ----------------------------------------------------------------------

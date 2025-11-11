@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -32,7 +33,7 @@
 
 using namespace LAMMPS_NS;
 
-#define MAXLINE 128
+static constexpr int MAXLINE = 128;
 
 /* ---------------------------------------------------------------------- */
 
@@ -149,20 +150,16 @@ void ProcMap::twolevel_grid(int nprocs, int *user_procgrid, int *procgrid,
    auto-detects NUMA sockets within a multi-core node
 ------------------------------------------------------------------------- */
 
-void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
-                        int *numagrid)
+void ProcMap::numa_grid(int numa_nodes, int nprocs, int *user_procgrid,
+                        int *procgrid, int *numagrid)
 {
-  // hardwire this for now
-
-  int numa_nodes = 1;
-
   // get names of all nodes
 
   int name_length;
   char node_name[MPI_MAX_PROCESSOR_NAME];
   MPI_Get_processor_name(node_name,&name_length);
   node_name[name_length] = '\0';
-  char *node_names = new char[MPI_MAX_PROCESSOR_NAME*nprocs];
+  auto *node_names = new char[MPI_MAX_PROCESSOR_NAME*nprocs];
   MPI_Allgather(node_name,MPI_MAX_PROCESSOR_NAME,MPI_CHAR,node_names,
                 MPI_MAX_PROCESSOR_NAME,MPI_CHAR,world);
   std::string node_string = std::string(node_name);
@@ -171,15 +168,15 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
   // NOTE: could do this without STL map
 
   std::map<std::string,int> name_map;
-  std::map<std::string,int>::iterator np;
   for (int i = 0; i < nprocs; i++) {
     std::string i_string = std::string(&node_names[i*MPI_MAX_PROCESSOR_NAME]);
-    np = name_map.find(i_string);
+    auto np = name_map.find(i_string);
     if (np == name_map.end()) name_map[i_string] = 1;
     else np->second++;
   }
   procs_per_node = name_map.begin()->second;
   procs_per_numa = procs_per_node / numa_nodes;
+  if (procs_per_numa < 1) procs_per_numa = 1;
 
   delete [] node_names;
 
@@ -190,6 +187,24 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
       user_procgrid[1] > 1 ||
       user_procgrid[2] > 1)
     error->all(FLERR,"Could not create numa grid of processors");
+
+  // factorization for the grid of NUMA nodes
+
+  int node_count = nprocs / procs_per_numa;
+
+  int **nodefactors;
+  int nodepossible = factor(node_count,nullptr);
+  memory->create(nodefactors,nodepossible,3,"procmap:nodefactors");
+  nodepossible = factor(node_count,nodefactors);
+
+  if (domain->dimension == 2)
+    nodepossible = cull_2d(nodepossible,nodefactors,3);
+  nodepossible = cull_user(nodepossible,nodefactors,3,user_procgrid);
+
+  if (nodepossible == 0)
+    error->all(FLERR,"Could not create numa grid of processors");
+
+  best_factors(nodepossible,nodefactors,nodegrid,1,1,1);
 
   // user settings for the factorization per numa node
   // currently not user settable
@@ -203,6 +218,7 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
   if (user_procgrid[1] == 1) user_numagrid[1] = 1;
   if (user_procgrid[2] == 1) user_numagrid[2] = 1;
 
+  // perform NUMA node factorization using subdomain sizes
   // initial factorization within NUMA node
 
   int **numafactors;
@@ -217,38 +233,6 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
   if (numapossible == 0)
     error->all(FLERR,"Could not create numa grid of processors");
 
-  best_factors(numapossible,numafactors,numagrid,1,1,1);
-
-  // user_nodegrid = implied user constraints on nodes
-
-  int user_nodegrid[3];
-  user_nodegrid[0] = user_procgrid[0] / numagrid[0];
-  user_nodegrid[1] = user_procgrid[1] / numagrid[1];
-  user_nodegrid[2] = user_procgrid[2] / numagrid[2];
-
-  // factorization for the grid of NUMA nodes
-
-  int node_count = nprocs / procs_per_numa;
-
-  int **nodefactors;
-  int nodepossible = factor(node_count,nullptr);
-  memory->create(nodefactors,nodepossible,3,"procmap:nodefactors");
-  nodepossible = factor(node_count,nodefactors);
-
-  if (domain->dimension == 2)
-    nodepossible = cull_2d(nodepossible,nodefactors,3);
-  nodepossible = cull_user(nodepossible,nodefactors,3,user_nodegrid);
-
-  if (nodepossible == 0)
-    error->all(FLERR,"Could not create numa grid of processors");
-
-  best_factors(nodepossible,nodefactors,nodegrid,
-               numagrid[0],numagrid[1],numagrid[2]);
-
-  // repeat NUMA node factorization using subdomain sizes
-  // refines the factorization if the user specified the node layout
-  // NOTE: this will not re-enforce user-procgrid constraint will it?
-
   best_factors(numapossible,numafactors,numagrid,
                nodegrid[0],nodegrid[1],nodegrid[2]);
 
@@ -259,8 +243,8 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
 
   node_id = 0;
   int node_num = 0;
-  for (np = name_map.begin(); np != name_map.end(); ++np) {
-    if (np->first == node_string) node_id = node_num;
+  for (const auto &np : name_map) {
+    if (np.first == node_string) node_id = node_num;
     node_num++;
   }
 
@@ -269,6 +253,7 @@ void ProcMap::numa_grid(int nprocs, int *user_procgrid, int *procgrid,
   procgrid[0] = nodegrid[0] * numagrid[0];
   procgrid[1] = nodegrid[1] * numagrid[1];
   procgrid[2] = nodegrid[2] * numagrid[2];
+
 }
 
 /* ----------------------------------------------------------------------
@@ -281,7 +266,7 @@ void ProcMap::custom_grid(char *cfile, int nprocs,
   int me;
   MPI_Comm_rank(world,&me);
 
-  char line[MAXLINE];
+  char line[MAXLINE] = {'\0'};
   FILE *fp = nullptr;
 
   if (me == 0) {
@@ -293,7 +278,7 @@ void ProcMap::custom_grid(char *cfile, int nprocs,
     char *ptr;
     if (!fgets(line,MAXLINE,fp))
       error->one(FLERR,"Unexpected end of custom file");
-    while (1) {
+    while (true) {
       if ((ptr = strchr(line,'#'))) *ptr = '\0';
       if (strspn(line," \t\n\r") != strlen(line)) break;
       if (!fgets(line,MAXLINE,fp))
@@ -879,7 +864,7 @@ int ProcMap::best_factors(int npossible, int **factors, int *best,
     area[2] = sqrt(c[0]*c[0] + c[1]*c[1] + c[2]*c[2]) / (sy*sz);
   }
 
-  int index;
+  int index = 0;
   double surf;
   double bestsurf = 2.0 * (area[0]+area[1]+area[2]);
 

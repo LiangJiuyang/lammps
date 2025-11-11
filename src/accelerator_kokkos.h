@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -19,14 +19,15 @@
 
 #ifdef LMP_KOKKOS
 
-#include "kokkos.h"              // IWYU pragma: export
-#include "atom_kokkos.h"         // IWYU pragma: export
-#include "comm_kokkos.h"         // IWYU pragma: export
-#include "comm_tiled_kokkos.h"   // IWYU pragma: export
-#include "domain_kokkos.h"       // IWYU pragma: export
-#include "neighbor_kokkos.h"     // IWYU pragma: export
-#include "memory_kokkos.h"       // IWYU pragma: export
-#include "modify_kokkos.h"       // IWYU pragma: export
+#include "atom_kokkos.h"          // IWYU pragma: export
+#include "comm_kokkos.h"          // IWYU pragma: export
+#include "comm_tiled_kokkos.h"    // IWYU pragma: export
+#include "domain_kokkos.h"        // IWYU pragma: export
+#include "group_kokkos.h"         // IWYU pragma: export
+#include "kokkos.h"               // IWYU pragma: export
+#include "memory_kokkos.h"        // IWYU pragma: export
+#include "modify_kokkos.h"        // IWYU pragma: export
+#include "neighbor_kokkos.h"      // IWYU pragma: export
 
 #define LAMMPS_INLINE KOKKOS_INLINE_FUNCTION
 
@@ -39,9 +40,10 @@
 #include "comm_brick.h"
 #include "comm_tiled.h"
 #include "domain.h"
-#include "neighbor.h"
+#include "group.h"
 #include "memory.h"
 #include "modify.h"
+#include "neighbor.h"
 
 #define LAMMPS_INLINE inline
 
@@ -52,25 +54,21 @@ class KokkosLMP {
   int kokkos_exists;
   int nthreads;
   int ngpus;
-  int numa;
+  int kk_fp32;
 
-  KokkosLMP(class LAMMPS *, int, char **) {kokkos_exists = 0;}
-  ~KokkosLMP() {}
-  void accelerator(int, char **) {}
-  int neigh_list_kokkos(int) {return 0;}
-  int neigh_count(int) {return 0;}
-};
-
-class Kokkos {
- public:
+  KokkosLMP(class LAMMPS *, int, char **) { kokkos_exists = 0; }
+  ~KokkosLMP() = default;
   static void finalize() {}
+  void accelerator(int, char **) {}
+  int neigh_list_kokkos(int) { return 0; }
+  int neigh_count(int) { return 0; }
+  void newton_check() {};
 };
 
 class AtomKokkos : public Atom {
  public:
   tagint **k_special;
   AtomKokkos(class LAMMPS *lmp) : Atom(lmp) {}
-  ~AtomKokkos() {}
   void sync(const ExecutionSpace /*space*/, unsigned int /*mask*/) {}
   void modified(const ExecutionSpace /*space*/, unsigned int /*mask*/) {}
 };
@@ -78,41 +76,41 @@ class AtomKokkos : public Atom {
 class CommKokkos : public CommBrick {
  public:
   CommKokkos(class LAMMPS *lmp) : CommBrick(lmp) {}
-  ~CommKokkos() {}
 };
 
 class CommTiledKokkos : public CommTiled {
  public:
   CommTiledKokkos(class LAMMPS *lmp) : CommTiled(lmp) {}
-  CommTiledKokkos(class LAMMPS *lmp, Comm *oldcomm) : CommTiled(lmp,oldcomm) {}
-  ~CommTiledKokkos() {}
+  CommTiledKokkos(class LAMMPS *lmp, Comm *oldcomm) : CommTiled(lmp, oldcomm) {}
 };
 
 class DomainKokkos : public Domain {
  public:
   DomainKokkos(class LAMMPS *lmp) : Domain(lmp) {}
-  ~DomainKokkos() {}
+};
+
+class GroupKokkos : public Group {
+ public:
+  GroupKokkos(class LAMMPS *lmp) : Group(lmp) {}
 };
 
 class NeighborKokkos : public Neighbor {
  public:
   NeighborKokkos(class LAMMPS *lmp) : Neighbor(lmp) {}
-  ~NeighborKokkos() {}
 };
 
 class MemoryKokkos : public Memory {
  public:
   MemoryKokkos(class LAMMPS *lmp) : Memory(lmp) {}
-  ~MemoryKokkos() {}
-  void grow_kokkos(tagint **, tagint **, int, int, const char*) {}
+  void grow_kokkos(tagint **, tagint **, int, int, const char *) {}
 };
 
 class ModifyKokkos : public Modify {
  public:
   ModifyKokkos(class LAMMPS *lmp) : Modify(lmp) {}
-  ~ModifyKokkos() {}
 };
 
+// NOLINTBEGIN
 class DAT {
  public:
   typedef double tdual_xfloat_1d;
@@ -120,8 +118,9 @@ class DAT {
   typedef int tdual_int_1d;
   typedef int tdual_int_2d;
 };
+// NOLINTEND
 
-}
+}    // namespace LAMMPS_NS
 
 #endif
 #endif

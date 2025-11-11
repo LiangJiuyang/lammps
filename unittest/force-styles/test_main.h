@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   http://lammps.sandia.gov, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/ Sandia National Laboratories
+   LAMMPS Development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -14,8 +14,14 @@
 #ifndef TEST_MAIN_H
 #define TEST_MAIN_H
 
+#include "pointers.h"
+
+#include "gtest/gtest.h"
 #include "test_config.h"
+
+#include <cmath>
 #include <string>
+#include <vector>
 
 extern TestConfig test_config;
 extern bool print_stats;
@@ -23,8 +29,7 @@ extern bool verbose;
 extern std::string INPUT_FOLDER;
 
 // convenience method to write out common entries
-void write_yaml_header(class YamlWriter *writer, TestConfig *cfg,
-                       const char *version);
+void write_yaml_header(class YamlWriter *writer, TestConfig *cfg, const char *version);
 
 #define EXPECT_FP_LE_WITH_EPS(val1, val2, eps)                \
     do {                                                      \
@@ -35,11 +40,15 @@ void write_yaml_header(class YamlWriter *writer, TestConfig *cfg,
         EXPECT_PRED_FORMAT2(::testing::DoubleLE, err, eps);   \
     } while (0);
 
-#if defined _WIN32
-static const char PATH_SEP = '\\';
-#else
-static const char PATH_SEP = '/';
-#endif
+void EXPECT_STRESS(const std::string &name, double *stress, const stress_t &expected_stress,
+                   double epsilon);
+void EXPECT_FORCES(const std::string &name, LAMMPS_NS::Atom *atom,
+                   const std::vector<coord_t> &f_ref, double epsilon);
+void EXPECT_POSITIONS(const std::string &name, LAMMPS_NS::Atom *atom,
+                      const std::vector<coord_t> &x_ref, double epsilon);
+void EXPECT_VELOCITIES(const std::string &name, LAMMPS_NS::Atom *atom,
+                       const std::vector<coord_t> &v_ref, double epsilon);
+void EXPECT_TORQUES(const std::string &name, LAMMPS_NS::Atom *atom,
+                    const std::vector<coord_t> &t_ref, double epsilon);
 
 #endif
-

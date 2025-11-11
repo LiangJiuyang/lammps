@@ -6,7 +6,7 @@ fix smd command
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID smd type values keyword values
 
@@ -46,6 +46,14 @@ Examples
 
 Description
 """""""""""
+
+.. admonition:: Fix smd is unmaintained
+   :class: warning
+
+   Please note that *fix smd* is unmaintained and has multiple known
+   issues.  We recommend to use the equivalent functionality in either
+   :doc:`fix colvars <fix_colvars>` or :doc:`fix plumed <fix_plumed>`
+   instead, which are both actively maintained.
 
 This fix implements several options of steered MD (SMD) as reviewed in
 :ref:`(Izrailev) <Izrailev>`, which allows to induce conformational
@@ -144,8 +152,8 @@ the :doc:`run <run>` command.  This fix is not invoked during
 Restrictions
 """"""""""""
 
-This fix is part of the USER-MISC package.  It is only enabled if
-LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+This fix is part of the EXTRA-FIX package.  It is only enabled if
+LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

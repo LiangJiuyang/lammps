@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,17 +12,18 @@
 ------------------------------------------------------------------------- */
 
 #ifdef NBIN_CLASS
-
+// clang-format off
 NBinStyle(kk/host,
           NBinKokkos<LMPHostType>,
-          NB_KOKKOS_HOST)
+          NB_STANDARD | NB_KOKKOS_HOST);
 
 NBinStyle(kk/device,
           NBinKokkos<LMPDeviceType>,
-          NB_KOKKOS_DEVICE)
-
+          NB_STANDARD | NB_KOKKOS_DEVICE);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_NBIN_KOKKOS_H
 #define LMP_NBIN_KOKKOS_H
 
@@ -37,9 +38,9 @@ class NBinKokkos : public NBinStandard {
   typedef ArrayTypes<DeviceType> AT;
 
   NBinKokkos(class LAMMPS *);
-  ~NBinKokkos() {}
-  void bin_atoms_setup(int);
-  void bin_atoms();
+
+  void bin_atoms_setup(int) override;
+  void bin_atoms() override;
 
   int atoms_per_bin;
   DAT::tdual_int_1d k_bincount;
@@ -52,14 +53,14 @@ class NBinKokkos : public NBinStandard {
   typename AT::t_int_2d_const c_bins;
   typename AT::t_int_1d atom2bin;
   typename AT::t_int_scalar d_resize;
-  typename ArrayTypes<LMPHostType>::t_int_scalar h_resize;
-  typename AT::t_x_array_randomread x;
+  HAT::t_int_scalar h_resize;
+  typename AT::t_kkfloat_1d_3_lr_randomread x;
 
   KOKKOS_INLINE_FUNCTION
   void binatomsItem(const int &i) const;
 
   KOKKOS_INLINE_FUNCTION
-  int coord2bin(const X_FLOAT & x,const X_FLOAT & y,const X_FLOAT & z) const
+  int coord2bin(const double & x,const double & y,const double & z) const
   {
     int ix,iy,iz;
 
@@ -91,7 +92,7 @@ class NBinKokkos : public NBinStandard {
   }
 
   KOKKOS_INLINE_FUNCTION
-  int coord2bin(const X_FLOAT & x,const X_FLOAT & y,const X_FLOAT & z, int* i) const
+  int coord2bin(const double & x,const double & y,const double & z, int* i) const
   {
     int ix,iy,iz;
 
@@ -150,6 +151,3 @@ struct NPairKokkosBinAtomsFunctor {
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-*/

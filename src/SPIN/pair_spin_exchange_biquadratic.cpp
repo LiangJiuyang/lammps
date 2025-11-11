@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -27,6 +28,7 @@
 #include "comm.h"
 #include "error.h"
 #include "force.h"
+#include "info.h"
 #include "memory.h"
 #include "neigh_list.h"
 
@@ -98,9 +100,9 @@ void PairSpinExchangeBiquadratic::coeff(int narg, char **arg)
   // check if args correct
 
   if (strcmp(arg[2],"biquadratic") != 0)
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   if ((narg != 10) && (narg != 12))
-    error->all(FLERR,"Incorrect args for pair coefficients");
+    error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
 
   int ilo,ihi,jlo,jhi;
   utils::bounds(FLERR,arg[0],1,atom->ntypes,ilo,ihi,error);
@@ -120,14 +122,10 @@ void PairSpinExchangeBiquadratic::coeff(int narg, char **arg)
   // read energy offset flag if specified
 
   while (iarg < narg) {
-    if (strcmp(arg[10],"offset") == 0) {
-      if (strcmp(arg[11],"yes") == 0) {
-        e_offset = 1;
-      } else if  (strcmp(arg[11],"no") == 0) {
-        e_offset = 0;
-      } else error->all(FLERR,"Incorrect args for pair coefficients");
+    if (strcmp(arg[iarg],"offset") == 0) {
+      e_offset = utils::logical(FLERR,arg[iarg+1],false,lmp);
       iarg += 2;
-    } else error->all(FLERR,"Incorrect args for pair coefficients");
+    } else error->all(FLERR,"Incorrect args for pair coefficients" + utils::errorurl(21));
   }
 
   int count = 0;
@@ -156,7 +154,9 @@ void PairSpinExchangeBiquadratic::coeff(int narg, char **arg)
 
 double PairSpinExchangeBiquadratic::init_one(int i, int j)
 {
-  if (setflag[i][j] == 0) error->all(FLERR,"All pair coeffs are not set");
+  if (setflag[i][j] == 0)
+    error->all(FLERR, Error::NOLASTLINE,
+               "All pair coeffs are not set. Status\n" + Info::get_pair_coeff_status(lmp));
 
   J1_mag[j][i] = J1_mag[i][j];
   J1_mech[j][i] = J1_mech[i][j];

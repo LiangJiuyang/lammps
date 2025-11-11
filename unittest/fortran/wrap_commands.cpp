@@ -1,8 +1,5 @@
 // unit tests for issuing command to a LAMMPS instance through the Fortran wrapper
 
-#include "lammps.h"
-#include <cstdio> // for stdin, stdout
-#include <mpi.h>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -18,11 +15,16 @@ void f_lammps_commands_string();
 double f_lammps_get_natoms();
 }
 
+// forward decl
+namespace LAMMPS_NS {
+class LAMMPS;
+}
+
 class LAMMPS_commands : public ::testing::Test {
 protected:
     LAMMPS_NS::LAMMPS *lmp;
-    LAMMPS_commands(){};
-    ~LAMMPS_commands() override{};
+    LAMMPS_commands()           = default;
+    ~LAMMPS_commands() override = default;
 
     void SetUp() override
     {

@@ -14,12 +14,12 @@ Syntax
 
 .. code-block:: LAMMPS
 
-   pair_coeff i j eps sigma
-   pair_coeff i j eps sigma cutoff
-   pair_coeff i j eps sigma wca
-   pair_coeff i j eps sigma cutoff wca
+   pair_coeff I J eps sigma
+   pair_coeff I J eps sigma cutoff
+   pair_coeff I J eps sigma wca
+   pair_coeff I J eps sigma cutoff wca
 
-* i,j = a particle type
+* I, J = a particle type
 * eps = interaction strength, i.e. the depth of the potential minimum (energy units)
 * sigma = distance of the potential minimum from 0
 * cutoff = the cutoff distance for this pair type, if different from global (distance units)
@@ -93,22 +93,22 @@ Mixing, shift, table, tail correction, restart, rRESPA info
 
 Mixing is not supported for this style.
 
-The *shift*\ , *table* and *tail* options are not relevant for this style.
+The *shift*, *table* and *tail* options are not relevant for this style.
 
 This pair style writes its information to :doc:`binary restart files <restart>`, so pair_style and pair_coeff commands do not need
 to be specified in an input script that reads a restart file.
 
 These pair styles can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  They do not support the
-*inner*\ , *middle*\ , *outer* keywords.
+*inner*, *middle*, *outer* keywords.
 
 ----------
 
 Restrictions
 """"""""""""
 
-The *cosine/squared* style is part of the USER-MISC package. It is only
-enabled if LAMMPS is build with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+The *cosine/squared* style is part of the EXTRA-PAIR package. It is only
+enabled if LAMMPS is build with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

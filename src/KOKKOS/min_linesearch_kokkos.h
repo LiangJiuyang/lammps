@@ -1,7 +1,8 @@
+// clang-format off
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -18,43 +19,37 @@
 
 namespace LAMMPS_NS {
 
-  struct s_double2 {
-    double d0, d1;
+  struct s_KK_double2 {
+    KK_FLOAT d0, d1;
     KOKKOS_INLINE_FUNCTION
-    s_double2() {
+    s_KK_double2() {
       d0 = d1 = 0.0;
     }
     KOKKOS_INLINE_FUNCTION
-    s_double2& operator+=(const s_double2 &rhs) {
+    s_KK_double2& operator+=(const s_KK_double2 &rhs) {
       d0 += rhs.d0;
       d1 += rhs.d1;
       return *this;
     }
-
-    KOKKOS_INLINE_FUNCTION
-    void operator+=(const volatile s_double2 &rhs) volatile {
-      d0 += rhs.d0;
-      d1 += rhs.d1;
-    }
   };
-  //typedef s_double2 double2;
+  //typedef s_KK_double2 KK_double2;
 
 class MinLineSearchKokkos : public MinKokkos {
  public:
   MinLineSearchKokkos(class LAMMPS *);
-  ~MinLineSearchKokkos();
-  void init();
-  void setup_style();
-  void reset_vectors();
+  ~MinLineSearchKokkos() override;
+  void init() override;
+  void setup_style() override;
+  void reset_vectors() override;
 
  //protected: // won't compile with CUDA
   // vectors needed by linesearch minimizers
   // allocated and stored by fix_minimize
   // x,f are stored by parent or Atom class or Pair class
 
-  DAT::t_ffloat_1d x0;   // coords at start of linesearch
-  DAT::t_ffloat_1d g;    // old gradient vector
-  DAT::t_ffloat_1d h;    // search direction vector
+  DAT::t_kkfloat_1d x0;   // coords at start of linesearch
+  DAT::t_kkfloat_1d g;    // old gradient vector
+  DAT::t_kkfloat_1d h;    // search direction vector
 
   double *gextra;             // g,h for extra global dof, x0 is stored by fix
   double *hextra;

@@ -9,7 +9,7 @@ Accelerator Variants: *langevin/kk*
 Syntax
 """"""
 
-.. parsed-literal::
+.. code-block:: LAMMPS
 
    fix ID group-ID langevin Tstart Tstop damp seed keyword values ...
 
@@ -27,10 +27,6 @@ Syntax
        *angmom* value = *no* or factor
          *no* = do not thermostat rotational degrees of freedom via the angular momentum
          factor = do thermostat rotational degrees of freedom via the angular momentum and apply numeric scale factor as discussed below
-       *gjf* value = *no* or *vfull* or *vhalf*
-         *no* = use standard formulation
-         *vfull* = use Gronbech-Jensen/Farago formulation
-         *vhalf* = use 2GJ formulation
        *omega* value = *no* or *yes*
          *no* = do not thermostat rotational degrees of freedom via the angular velocity
          *yes* = do thermostat rotational degrees of freedom via the angular velocity
@@ -56,7 +52,7 @@ Examples
 Description
 """""""""""
 
-Apply a Langevin thermostat as described in :ref:`(Schneider) <Schneider1>`
+Apply a Langevin thermostat as described in :ref:`(Bruenger) <Bruenger1>`
 to a group of atoms which models an interaction with a background
 implicit solvent.  Used with :doc:`fix nve <fix_nve>`, this command
 performs Brownian dynamics (BD), since the total force on each atom
@@ -81,11 +77,11 @@ the particle's velocity.  The proportionality constant for each atom is
 computed as :math:`\frac{m}{\mathrm{damp}}`, where *m* is the mass of the
 particle and damp is the damping factor specified by the user.
 
-:math:`F_r` is a force due to solvent atoms at a temperature *T*
+:math:`F_r` is a force due to solvent atoms at a temperature :math:`T`
 randomly bumping into the particle.  As derived from the
 fluctuation/dissipation theorem, its magnitude as shown above is
 proportional to :math:`\sqrt{\frac{k_B T m}{dt~\mathrm{damp}}}`, where
-:math:`k_B` is the Boltzmann constant, *T* is the desired temperature,
+:math:`k_B` is the Boltzmann constant, :math:`T` is the desired temperature,
 *m* is the mass of the particle, *dt* is the timestep size, and damp is
 the damping factor.  Random numbers are used to randomize the direction
 and magnitude of this force as described in :ref:`(Dunweg) <Dunweg1>`,
@@ -112,7 +108,7 @@ thermostatting takes place; see the description below.
    fix - e.g. by :doc:`fix nvt <fix_nh>` or :doc:`fix temp/rescale
    <fix_temp_rescale>` commands.
 
-See the :doc:`Howto thermostat <Howto_thermostat>` doc page for
+See the :doc:`Howto thermostat <Howto_thermostat>` page for
 a discussion of different ways to compute temperature and perform
 thermostatting.
 
@@ -138,16 +134,18 @@ temperature with optional time-dependence as well.
 
 Like other fixes that perform thermostatting, this fix can be used
 with :doc:`compute commands <compute>` that remove a "bias" from the
-atom velocities.  E.g. removing the center-of-mass velocity from a
-group of atoms or removing the x-component of velocity from the
-calculation.  This is not done by default, but only if the
-:doc:`fix_modify <fix_modify>` command is used to assign a temperature
-compute to this fix that includes such a bias term.  See the doc pages
-for individual :doc:`compute commands <compute>` to determine which ones
-include a bias.  In this case, the thermostat works in the following
-manner: bias is removed from each atom, thermostatting is performed on
-the remaining thermal degrees of freedom, and the bias is added back
-in.
+atom velocities.  E.g. to apply the thermostat only to atoms within a
+spatial :doc:`region <region>`, or to remove the center-of-mass
+velocity from a group of atoms, or to remove the x-component of
+velocity from the calculation.
+
+This is not done by default, but only if the :doc:`fix_modify
+<fix_modify>` command is used to assign a temperature compute to this
+fix that includes such a bias term.  See the doc pages for individual
+:doc:`compute temp commands <compute>` to determine which ones include
+a bias.  In this case, the thermostat works in the following manner:
+bias is removed from each atom, thermostatting is performed on the
+remaining thermal degrees of freedom, and the bias is added back in.
 
 The *damp* parameter is specified in time units and determines how
 rapidly the temperature is relaxed.  For example, a value of 100.0 means
@@ -183,7 +181,8 @@ omega (which is derived from the angular momentum in the case of
 aspherical particles).
 
 The rotational temperature of the particles can be monitored by the
-:doc:`compute temp/sphere <compute_temp_sphere>` and :doc:`compute temp/asphere <compute_temp_asphere>` commands with their rotate
+:doc:`compute temp/sphere <compute_temp_sphere>` and :doc:`compute
+temp/asphere <compute_temp_asphere>` commands with their rotate
 options.
 
 For the *omega* keyword there is also a scale factor of
@@ -191,7 +190,7 @@ For the *omega* keyword there is also a scale factor of
 :math:`F_f` (damping) term in the equation above and of
 :math:`\sqrt{\frac{10.0}{3.0}}` as a multiplier on the :math:`F_r` term.
 This does not affect the thermostatting behavior of the Langevin
-formalism but insures that the randomized rotational diffusivity of
+formalism but ensures that the randomized rotational diffusivity of
 spherical particles is correct.
 
 For the *angmom* keyword a similar scale factor is needed which is
@@ -228,45 +227,21 @@ the particles.  As described below, this energy can then be printed
 out or added to the potential energy of the system to monitor energy
 conservation.
 
-.. note::
-
-   This accumulated energy does NOT include kinetic energy removed
-   by the *zero* flag. LAMMPS will print a warning when both options are
-   active.
-
 The keyword *zero* can be used to eliminate drift due to the
 thermostat. Because the random forces on different atoms are
 independent, they do not sum exactly to zero.  As a result, this fix
 applies a small random force to the entire system, and the
 center-of-mass of the system undergoes a slow random walk.  If the
-keyword *zero* is set to *yes*\ , the total random force is set exactly
+keyword *zero* is set to *yes*, the total random force is set exactly
 to zero by subtracting off an equal part of it from each atom in the
 group.  As a result, the center-of-mass of a system with zero initial
 momentum will not drift over time.
 
-The keyword *gjf* can be used to run the :ref:`Gronbech-Jensen/Farago
-<Gronbech-Jensen>` time-discretization of the Langevin model.  As
-described in the papers cited below, the purpose of this method is to
-enable longer timesteps to be used (up to the numerical stability
-limit of the integrator), while still producing the correct Boltzmann
-distribution of atom positions.
+.. deprecated:: 22Jul2025
 
-The current implementation provides the user with the option to output
-the velocity in one of two forms: *vfull* or *vhalf*\ , which replaces
-the outdated option *yes*\ . The *gjf* option *vfull* outputs the
-on-site velocity given in :ref:`Gronbech-Jensen/Farago
-<Gronbech-Jensen>`; this velocity is shown to be systematically lower
-than the target temperature by a small amount, which grows
-quadratically with the timestep.  The *gjf* option *vhalf* outputs the
-2GJ half-step velocity given in :ref:`Gronbech Jensen/Gronbech-Jensen
-<2Gronbech-Jensen>`; for linear systems, this velocity is shown to not
-have any statistical errors for any stable time step.  An overview of
-statistically correct Boltzmann and Maxwell-Boltzmann sampling of true
-on-site and true half-step velocities is given in
-:ref:`Gronbech-Jensen <1Gronbech-Jensen>`.  Regardless of the choice
-of output velocity, the sampling of the configurational distribution
-of atom positions is the same, and linearly consistent with the target
-temperature.
+The *gjf* keyword in fix langevin has been removed and the GJF
+functionality has been moved to its own fix style :doc:`fix gjf
+<fix_gjf>`. and it is strongly recommended to use that fix instead.
 
 ----------
 
@@ -277,11 +252,12 @@ temperature.
 Restart, fix_modify, output, run start/stop, minimize info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
-No information about this fix is written to :doc:`binary restart files <restart>`.  Because the state of the random number generator
-is not saved in restart files, this means you cannot do "exact"
-restarts with this fix, where the simulation continues on the same as
-if no restart had taken place.  However, in a statistical sense, a
-restarted simulation should produce the same behavior.
+No information about this fix is written to :doc:`binary restart files
+<restart>`.  Because the state of the random number generator is not
+saved in restart files, this means you cannot do "exact" restarts with
+this fix, where the simulation continues on the same as if no restart
+had taken place.  However, in a statistical sense, a restarted
+simulation should produce the same behavior.
 
 The :doc:`fix_modify <fix_modify>` *temp* option is supported by this
 fix.  You can use it to assign a temperature :doc:`compute <compute>`
@@ -291,8 +267,8 @@ this fix and by the compute should be the same.
 
 The cumulative energy change in the system imposed by this fix is
 included in the :doc:`thermodynamic output <thermo_style>` keywords
-*ecouple* and *econserve*\ , but only if the *tally* keyword to set to
-*yes*\ .  See the :doc:`thermo_style <thermo_style>` doc page for
+*ecouple* and *econserve*, but only if the *tally* keyword to set to
+*yes*\ .  See the :doc:`thermo_style <thermo_style>` page for
 details.
 
 This fix computes a global scalar which can be accessed by various
@@ -311,39 +287,30 @@ This fix is not invoked during :doc:`energy minimization <minimize>`.
 Restrictions
 """"""""""""
 
-For *gjf* do not choose damp=dt/2. *gjf* is not compatible
-with run_style respa.
+none.
 
 Related commands
 """"""""""""""""
 
-:doc:`fix nvt <fix_nh>`, :doc:`fix temp/rescale <fix_temp_rescale>`, :doc:`fix viscous <fix_viscous>`, :doc:`fix nvt <fix_nh>`, :doc:`pair_style dpd/tstat <pair_dpd>`
+:doc:`fix nvt <fix_nh>`, :doc:`fix temp/rescale <fix_temp_rescale>`,
+:doc:`fix viscous <fix_viscous>`, :doc:`fix nvt <fix_nh>`,
+:doc:`pair_style dpd/tstat <pair_dpd>`, :doc:`fix gjf <fix_gjf>`,
+:doc:`fix gle <fix_gle>`, :doc:`fix gld <fix_gld>`
 
 Default
 """""""
 
 The option defaults are angmom = no, omega = no, scale = 1.0 for all
-types, tally = no, zero = no, gjf = no.
+types, tally = no, zero = no.
 
 ----------
+
+.. _Bruenger1:
+
+**(Bruenger)** Bruenger, Brooks, and Karplus, Chem. Phys. Lett. 105, 495 (1982).
+[Previously attributed to Schneider and Stoll, Phys. Rev. B 17, 1302 (1978).
+Implementation remains unchanged.]
 
 .. _Dunweg1:
 
 **(Dunweg)** Dunweg and Paul, Int J of Modern Physics C, 2, 817-27 (1991).
-
-.. _Schneider1:
-
-**(Schneider)** Schneider and Stoll, Phys Rev B, 17, 1302 (1978).
-
-.. _Gronbech-Jensen:
-
-**(Gronbech-Jensen)** Gronbech-Jensen and Farago, Mol Phys, 111, 983
-(2013); Gronbech-Jensen, Hayre, and Farago, Comp Phys Comm, 185, 524 (2014)
-
-.. _2Gronbech-Jensen:
-
-**(Gronbech-Jensen)** Gronbech Jensen and Gronbech-Jensen, Mol Phys, 117, 2511 (2019)
-
-.. _1Gronbech-Jensen:
-
-**(Gronbech-Jensen)** Gronbech-Jensen, Mol Phys (2019); https://doi.org/10.1080/00268976.2019.1662506

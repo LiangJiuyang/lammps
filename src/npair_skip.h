@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,19 +12,50 @@
 ------------------------------------------------------------------------- */
 
 #ifdef NPAIR_CLASS
-
+// clang-format off
+using NPairSkip = NPairSkipTemp<0>;
 NPairStyle(skip,
            NPairSkip,
            NP_SKIP | NP_HALF | NP_FULL |
            NP_NSQ | NP_BIN | NP_MULTI |
-           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI)
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI);
 
+using NPairSkip = NPairSkipTemp<0>;
 NPairStyle(skip/ghost,
            NPairSkip,
            NP_SKIP | NP_HALF | NP_FULL |
            NP_NSQ | NP_BIN | NP_MULTI |
-           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI | NP_GHOST)
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI | NP_GHOST);
 
+using NPairSkipSize = NPairSkipTemp<0>;
+NPairStyle(skip/half/size,
+           NPairSkipSize,
+           NP_SKIP | NP_SIZE | NP_HALF | NP_FULL |
+           NP_NSQ | NP_BIN | NP_MULTI |
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI);
+
+using NPairSkipTrim = NPairSkipTemp<1>;
+NPairStyle(skip/trim,
+           NPairSkipTrim,
+           NP_SKIP | NP_HALF | NP_FULL |
+           NP_NSQ | NP_BIN | NP_MULTI |
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI | NP_TRIM);
+
+using NPairSkipTrim = NPairSkipTemp<1>;
+NPairStyle(skip/ghost/trim,
+           NPairSkipTrim,
+           NP_SKIP | NP_HALF | NP_FULL |
+           NP_NSQ | NP_BIN | NP_MULTI |
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI | NP_GHOST | NP_TRIM);
+
+using NPairSkipTrimSize = NPairSkipTemp<1>;
+NPairStyle(skip/trim/half/size,
+           NPairSkipTrimSize,
+           NP_SKIP | NP_SIZE | NP_HALF | NP_FULL |
+           NP_NSQ | NP_BIN | NP_MULTI |
+           NP_NEWTON | NP_NEWTOFF | NP_ORTHO | NP_TRI | NP_TRIM);
+
+// clang-format on
 #else
 
 #ifndef LMP_NPAIR_SKIP_H
@@ -34,22 +65,14 @@ NPairStyle(skip/ghost,
 
 namespace LAMMPS_NS {
 
-class NPairSkip : public NPair {
+template<int TRIM>
+class NPairSkipTemp : public NPair {
  public:
-  NPairSkip(class LAMMPS *);
-  ~NPairSkip() {}
-  void build(class NeighList *);
+  NPairSkipTemp(class LAMMPS *);
+  void build(class NeighList *) override;
 };
 
-}
+}    // namespace LAMMPS_NS
 
 #endif
 #endif
-
-/* ERROR/WARNING messages:
-
-E: Neighbor list overflow, boost neigh_modify one
-
-UNDOCUMENTED
-
-*/

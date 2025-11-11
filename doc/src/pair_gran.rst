@@ -80,7 +80,7 @@ The two Hookean styles use this formula:
 
    F_{hk} = (k_n \delta \mathbf{n}_{ij} -
    m_{eff} \gamma_n\mathbf{ v}_n) -
-   (k_t \mathbf{ \Delta s}_t +
+   (k_t \boldsymbol{\Delta} \mathbf{s}_t +
    m_{eff} \gamma_t \mathbf{v}_t)
 
 The Hertzian style uses this formula:
@@ -91,7 +91,7 @@ The Hertzian style uses this formula:
      \sqrt{\delta} \sqrt{\frac{R_i R_j}{R_i + R_j}}
      \Big[ (k_n \delta \mathbf{n}_{ij} -
        m_{eff} \: \gamma_n \mathbf{ v}_n) -
-       (k_t \mathbf{ \Delta s}_t +
+       (k_t \boldsymbol{\Delta} \mathbf{s}_t +
        m_{eff} \: \gamma_t \mathbf{v}_t) \Big]
 
 In both equations the first parenthesized term is the normal force
@@ -101,7 +101,7 @@ damping force.  The tangential force also has 2 terms: a shear force
 and a damping force.  The shear force is a "history" effect that
 accounts for the tangential displacement between the particles for the
 duration of the time they are in contact.  This term is included in
-pair styles *hooke/history* and *hertz/history*\ , but is not included
+pair styles *hooke/history* and *hertz/history*, but is not included
 in pair style *hooke*\ .  The tangential damping force term is included
 in all three pair styles if *dampflag* is set to 1; it is not included
 if *dampflag* is set to 0.
@@ -114,7 +114,7 @@ The other quantities in the equations are as follows:
 * :math:`\gamma_n` = viscoelastic damping constant for normal contact
 * :math:`\gamma_t` = viscoelastic damping constant for tangential contact
 * :math:`m_{eff} = M_i M_j / (M_i + M_j) =` effective mass of 2 particles of mass M_i and M_j
-* :math:`\mathbf{\Delta s}_t =` tangential displacement vector between 2 particles       which is truncated to satisfy a frictional yield criterion
+* :math:`\boldsymbol{\Delta} \mathbf{s}_t =` tangential displacement vector between 2 particles which is truncated to satisfy a frictional yield criterion
 * :math:`n_{ij} =` unit vector along the line connecting the centers of the 2 particles
 * :math:`V_n =` normal component of the relative velocity of the 2 particles
 * :math:`V_t =` tangential component of the relative velocity of the 2 particles
@@ -144,7 +144,7 @@ two particles, and is thus a non-linear function of overlap distance.
 Thus Kn has units of force per area and is thus specified in units of
 (pressure).  The effects of absolute particle size (monodispersity)
 and relative size (polydispersity) are captured in the radii-dependent
-pre-factors.  When these pre-factors are carried through to the other
+prefactors.  When these prefactors are carried through to the other
 terms in the force equation it means that the specified :math:`\gamma_n` is in
 units of (1/(time\*distance)), :math:`K_t` is in units of (pressure), and
 :math:`\gamma_t` is in units of (1/(time\*distance)).
@@ -240,7 +240,7 @@ specified in an input script that reads a restart file.
 
 These pair styles can only be used via the *pair* keyword of the
 :doc:`run_style respa <run_style>` command.  They do not support the
-*inner*\ , *middle*\ , *outer* keywords.
+*inner*, *middle*, *outer* keywords.
 
 The single() function of these pair styles returns 0.0 for the energy
 of a pairwise interaction, since energy is not conserved in these
@@ -254,7 +254,7 @@ normal direction (along the line joining the 2 sphere centers).  The
 last 3 (8-10) the components of the relative velocity in the
 tangential direction.
 
-These extra quantities can be accessed by the :doc:`compute pair/local <compute_pair_local>` command, as *p1*\ , *p2*\ , ...,
+These extra quantities can be accessed by the :doc:`compute pair/local <compute_pair_local>` command, as *p1*, *p2*, ...,
 *p10*\ .
 
 ----------
@@ -263,7 +263,7 @@ Restrictions
 """"""""""""
 
 All the granular pair styles are part of the GRANULAR package.  It is
-only enabled if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+only enabled if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 These pair styles require that atoms store torque and angular velocity
 (omega) as defined by the :doc:`atom_style <atom_style>`.  They also
@@ -278,6 +278,11 @@ These pair styles will not restart exactly when using the
 statistically similar results.  This is because the forces they
 compute depend on atom velocities.  See the
 :doc:`read_restart <read_restart>` command for more details.
+
+Accumulated values for individual contacts are saved to to restart
+files but are not saved to data files. Therefore, forces may
+differ significantly when a system is reloaded using A
+:doc:`read_data <read_data>` command.
 
 Related commands
 """"""""""""""""

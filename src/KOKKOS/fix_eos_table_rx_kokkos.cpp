@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -23,8 +24,6 @@
 #include "comm.h"
 #include <cmath>
 #include "atom_masks.h"
-
-#define MAXLINE 1024
 
 #ifdef DBL_EPSILON
   #define MY_EPSILON (10.0*DBL_EPSILON)
@@ -56,30 +55,30 @@ FixEOStableRXKokkos<DeviceType>::FixEOStableRXKokkos(LAMMPS *lmp, int narg, char
   k_error_flag = DAT::tdual_int_scalar("fix:error_flag");
   k_warning_flag = DAT::tdual_int_scalar("fix:warning_flag");
 
-  k_dHf = DAT::tdual_float_1d("fix:dHf",nspecies);
-  k_energyCorr = DAT::tdual_float_1d("fix:energyCorr",nspecies);
-  k_tempCorrCoeff = DAT::tdual_float_1d("fix:tempCorrCoeff",nspecies);
-  k_moleculeCorrCoeff = DAT::tdual_float_1d("fix:moleculeCorrCoeff",nspecies);
+  k_dHf = DAT::tdual_kkfloat_1d("fix:dHf",nspecies);
+  k_energyCorr = DAT::tdual_kkfloat_1d("fix:energyCorr",nspecies);
+  k_tempCorrCoeff = DAT::tdual_kkfloat_1d("fix:tempCorrCoeff",nspecies);
+  k_moleculeCorrCoeff = DAT::tdual_kkfloat_1d("fix:moleculeCorrCoeff",nspecies);
   for (int n = 0; n < nspecies; n++) {
-    k_dHf.h_view(n) = dHf[n];
-    k_energyCorr.h_view(n) = energyCorr[n];
-    k_tempCorrCoeff.h_view(n) = tempCorrCoeff[n];
-    k_moleculeCorrCoeff.h_view(n) = moleculeCorrCoeff[n];
+    k_dHf.view_host()(n) = dHf[n];
+    k_energyCorr.view_host()(n) = energyCorr[n];
+    k_tempCorrCoeff.view_host()(n) = tempCorrCoeff[n];
+    k_moleculeCorrCoeff.view_host()(n) = moleculeCorrCoeff[n];
   }
 
-  k_dHf.modify<LMPHostType>();
+  k_dHf.modify_host();
   k_dHf.sync<DeviceType>();
   d_dHf = k_dHf.view<DeviceType>();
 
-  k_energyCorr.modify<LMPHostType>();
+  k_energyCorr.modify_host();
   k_energyCorr.sync<DeviceType>();
   d_energyCorr = k_energyCorr.view<DeviceType>();
 
-  k_tempCorrCoeff.modify<LMPHostType>();
+  k_tempCorrCoeff.modify_host();
   k_tempCorrCoeff.sync<DeviceType>();
   d_tempCorrCoeff = k_tempCorrCoeff.view<DeviceType>();
 
-  k_moleculeCorrCoeff.modify<LMPHostType>();
+  k_moleculeCorrCoeff.modify_host();
   k_moleculeCorrCoeff.sync<DeviceType>();
   d_moleculeCorrCoeff = k_moleculeCorrCoeff.view<DeviceType>();
 }
@@ -124,7 +123,7 @@ void FixEOStableRXKokkos<DeviceType>::setup(int /*vflag*/)
 
   // Communicate the updated momenta and velocities to all nodes
   atomKK->sync(Host,UCHEM_MASK | UCG_MASK | UCGNEW_MASK);
-  comm->forward_comm_fix(this);
+  comm->forward_comm(this);
   atomKK->modified(Host,UCHEM_MASK | UCG_MASK | UCGNEW_MASK);
 
   atomKK->sync(execution_space,MASK_MASK | UCOND_MASK | UMECH_MASK | UCHEM_MASK | DPDTHETA_MASK | DVECTOR_MASK);
@@ -140,7 +139,7 @@ template<class DeviceType>
 KOKKOS_INLINE_FUNCTION
 void FixEOStableRXKokkos<DeviceType>::operator()(TagFixEOStableRXSetup, const int &i) const {
   if (mask[i] & groupbit) {
-    const double duChem = uCG[i] - uCGnew[i];
+    const KK_FLOAT duChem = uCG[i] - uCGnew[i];
     uChem[i] += duChem;
     uCG[i] = 0.0;
     uCGnew[i] = 0.0;
@@ -191,7 +190,7 @@ void FixEOStableRXKokkos<DeviceType>::init()
 template<class DeviceType>
 KOKKOS_INLINE_FUNCTION
 void FixEOStableRXKokkos<DeviceType>::operator()(TagFixEOStableRXInit, const int &i) const {
-  double tmp;
+  KK_FLOAT tmp;
   if (mask[i] & groupbit) {
     if (dpdTheta[i] <= 0.0)
       k_error_flag.template view<DeviceType>()() = 1;
@@ -264,7 +263,7 @@ void FixEOStableRXKokkos<DeviceType>::end_of_step()
 
   // Communicate the ghost uCGnew
   atomKK->sync(Host,UCG_MASK | UCGNEW_MASK);
-  comm->reverse_comm_fix(this);
+  comm->reverse_comm(this);
   atomKK->modified(Host,UCG_MASK | UCGNEW_MASK);
 
   atomKK->sync(execution_space,MASK_MASK | UCHEM_MASK | UCG_MASK | UCGNEW_MASK);
@@ -273,7 +272,7 @@ void FixEOStableRXKokkos<DeviceType>::end_of_step()
 
   // Communicate the updated momenta and velocities to all nodes
   atomKK->sync(Host,UCHEM_MASK | UCG_MASK | UCGNEW_MASK);
-  comm->forward_comm_fix(this);
+  comm->forward_comm(this);
   atomKK->modified(Host,UCHEM_MASK | UCG_MASK | UCGNEW_MASK);
 
   atomKK->sync(execution_space,MASK_MASK | UCOND_MASK | UMECH_MASK | UCHEM_MASK | DPDTHETA_MASK | DVECTOR_MASK);
@@ -291,11 +290,11 @@ void FixEOStableRXKokkos<DeviceType>::end_of_step()
 
 template<class DeviceType>
 KOKKOS_INLINE_FUNCTION
-void FixEOStableRXKokkos<DeviceType>::energy_lookup(int id, double thetai, double &ui) const
+void FixEOStableRXKokkos<DeviceType>::energy_lookup(int id, KK_FLOAT thetai, KK_FLOAT &ui) const
 {
   int itable, nPG;
-  double fraction, uTmp, nMolecules, nTotal, nTotalPG;
-  double tolerance = 1.0e-10;
+  KK_FLOAT fraction, uTmp, nMolecules, nTotal, nTotalPG;
+  KK_FLOAT tolerance = 1.0e-10;
 
   ui = 0.0;
   nTotal = 0.0;
@@ -332,14 +331,14 @@ void FixEOStableRXKokkos<DeviceType>::energy_lookup(int id, double thetai, doubl
       uTmp += d_dHf[ispecies];
       uTmp += d_tempCorrCoeff[ispecies]*thetai; // temperature correction
       uTmp += d_energyCorr[ispecies]; // energy correction
-      if (nPG > 0) ui += d_moleculeCorrCoeff[ispecies]*nTotalPG/double(nPG); // molecule correction
+      if (nPG > 0) ui += d_moleculeCorrCoeff[ispecies]*nTotalPG/KK_FLOAT(nPG); // molecule correction
 
       if (rx_flag) nMolecules = dvector(ispecies,id);
       else nMolecules = 1.0;
       ui += nMolecules*uTmp;
     }
   }
-  ui = ui - double(nTotal+1.5)*boltz*thetai;
+  ui = ui - KK_FLOAT(nTotal+1.5)*boltz*thetai;
 }
 
 /* ----------------------------------------------------------------------
@@ -348,16 +347,16 @@ void FixEOStableRXKokkos<DeviceType>::energy_lookup(int id, double thetai, doubl
 
 template<class DeviceType>
 KOKKOS_INLINE_FUNCTION
-void FixEOStableRXKokkos<DeviceType>::temperature_lookup(int id, double ui, double &thetai) const
+void FixEOStableRXKokkos<DeviceType>::temperature_lookup(int id, KK_FLOAT ui, KK_FLOAT &thetai) const
 {
   //Table *tb = &tables[0];
 
   int it;
-  double t1,t2,u1,u2,f1,f2;
-  double maxit = 100;
-  double temp;
-  double delta = 0.001;
-  double tolerance = 1.0e-10;
+  KK_FLOAT t1,t2,u1,u2,f1,f2;
+  KK_FLOAT maxit = 100;
+  KK_FLOAT temp;
+  KK_FLOAT delta = 0.001;
+  KK_FLOAT tolerance = 1.0e-10;
   int lo = d_table_const.lo(0);
   int hi = d_table_const.hi(0);
 
@@ -414,9 +413,9 @@ template<class DeviceType>
 int FixEOStableRXKokkos<DeviceType>::pack_forward_comm(int n, int *list, double *buf, int /*pbc_flag*/, int * /*pbc*/)
 {
   int ii,jj,m;
-  HAT::t_efloat_1d h_uChem = atomKK->k_uChem.h_view;
-  HAT::t_efloat_1d h_uCG = atomKK->k_uCG.h_view;
-  HAT::t_efloat_1d h_uCGnew = atomKK->k_uCGnew.h_view;
+  HAT::t_double_1d h_uChem = atomKK->k_uChem.view_host();
+  HAT::t_double_1d h_uCG = atomKK->k_uCG.view_host();
+  HAT::t_double_1d h_uCGnew = atomKK->k_uCGnew.view_host();
 
   m = 0;
   for (ii = 0; ii < n; ii++) {
@@ -434,9 +433,9 @@ template<class DeviceType>
 void FixEOStableRXKokkos<DeviceType>::unpack_forward_comm(int n, int first, double *buf)
 {
   int ii,m,last;
-  HAT::t_efloat_1d h_uChem = atomKK->k_uChem.h_view;
-  HAT::t_efloat_1d h_uCG = atomKK->k_uCG.h_view;
-  HAT::t_efloat_1d h_uCGnew = atomKK->k_uCGnew.h_view;
+  HAT::t_double_1d h_uChem = atomKK->k_uChem.view_host();
+  HAT::t_double_1d h_uCG = atomKK->k_uCG.view_host();
+  HAT::t_double_1d h_uCGnew = atomKK->k_uCGnew.view_host();
 
   m = 0;
   last = first + n ;
@@ -453,8 +452,8 @@ template<class DeviceType>
 int FixEOStableRXKokkos<DeviceType>::pack_reverse_comm(int n, int first, double *buf)
 {
   int i,m,last;
-  HAT::t_efloat_1d h_uCG = atomKK->k_uCG.h_view;
-  HAT::t_efloat_1d h_uCGnew = atomKK->k_uCGnew.h_view;
+  HAT::t_double_1d h_uCG = atomKK->k_uCG.view_host();
+  HAT::t_double_1d h_uCGnew = atomKK->k_uCGnew.view_host();
 
   m = 0;
   last = first + n;
@@ -471,8 +470,8 @@ template<class DeviceType>
 void FixEOStableRXKokkos<DeviceType>::unpack_reverse_comm(int n, int *list, double *buf)
 {
   int i,j,m;
-  HAT::t_efloat_1d h_uCG = atomKK->k_uCG.h_view;
-  HAT::t_efloat_1d h_uCGnew = atomKK->k_uCGnew.h_view;
+  HAT::t_double_1d h_uCG = atomKK->k_uCG.view_host();
+  HAT::t_double_1d h_uCGnew = atomKK->k_uCGnew.view_host();
 
   m = 0;
   for (i = 0; i < n; i++) {
@@ -489,20 +488,20 @@ template<class DeviceType>
 void FixEOStableRXKokkos<DeviceType>::error_check()
 {
   k_error_flag.template modify<DeviceType>();
-  k_error_flag.template sync<LMPHostType>();
-  if (k_error_flag.h_view() == 1)
+  k_error_flag.sync_host();
+  if (k_error_flag.view_host()() == 1)
     error->one(FLERR,"Internal temperature <= zero");
-  else if (k_error_flag.h_view() == 2)
+  else if (k_error_flag.view_host()() == 2)
     error->one(FLERR,"NaN detected in secant solver.");
-  else if (k_error_flag.h_view() == 3)
+  else if (k_error_flag.view_host()() == 3)
     error->one(FLERR,"Maxit exceeded in secant solver.");
 
   k_warning_flag.template modify<DeviceType>();
-  k_warning_flag.template sync<LMPHostType>();
-  if (k_warning_flag.h_view()) {
+  k_warning_flag.sync_host();
+  if (k_warning_flag.view_host()()) {
     error->warning(FLERR,"Secant solver did not converge because table bounds were exceeded.");
-    k_warning_flag.h_view() = 0;
-    k_warning_flag.template modify<LMPHostType>();
+    k_warning_flag.view_host()() = 0;
+    k_warning_flag.modify_host();
     k_warning_flag.template sync<DeviceType>();
   }
 }

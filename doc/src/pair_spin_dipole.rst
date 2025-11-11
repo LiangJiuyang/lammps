@@ -43,7 +43,7 @@ vector omega and mechanical force between particles I and J.
 
 .. math::
 
-   \mathcal{H}_{\rm long} & =
+   \mathcal{H}_\mathrm{long} & =
    -\frac{\mu_{0} \left( \mu_B\right)^2}{4\pi}
    \sum_{i,j,i\neq j}^{N}
     \frac{g_i g_j}{r_{ij}^3}
@@ -97,7 +97,7 @@ Restrictions
 
 The *spin/dipole/cut* and *spin/dipole/long* styles are part of
 the SPIN package.  They are only enabled if LAMMPS was built with that
-package.  See the :doc:`Build package <Build_package>` doc page for more
+package.  See the :doc:`Build package <Build_package>` page for more
 info.
 
 Using dipole/spin pair styles with *electron* :doc:`units <units>` is not

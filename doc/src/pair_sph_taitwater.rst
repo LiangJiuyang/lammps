@@ -1,7 +1,10 @@
 .. index:: pair_style sph/taitwater
+.. index:: pair_style sph/taitwater/gpu
 
 pair_style sph/taitwater command
 ================================
+
+Accelerator Variants: *sph/taitwater/gpu*
 
 Syntax
 """"""
@@ -35,8 +38,14 @@ speed of sound.
 This pair style also computes Monaghan's artificial viscosity to
 prevent particles from interpenetrating :ref:`(Monaghan) <Monaghan>`.
 
-See `this PDF guide <USER/sph/SPH_LAMMPS_userguide.pdf>`_ to using SPH in
+See `this PDF guide <PDF/SPH_LAMMPS_userguide.pdf>`_ to using SPH in
 LAMMPS.
+
+.. note::
+
+   Please note that the SPH PDF guide file has not been updated for
+   many years and thus does not reflect the current *syntax* of the
+   SPH package commands. For that please refer to the LAMMPS manual.
 
 The following coefficients must be defined for each pair of atoms
 types via the :doc:`pair_coeff <pair_coeff>` command as in the examples
@@ -46,6 +55,10 @@ above.
 * :math:`c_0` reference soundspeed (distance/time units)
 * :math:`\nu` artificial viscosity (no units)
 * h kernel function cutoff (distance units)
+
+----------
+
+.. include:: accel_styles.rst
 
 ----------
 
@@ -61,14 +74,14 @@ shift, table, and tail options.
 This style does not write information to :doc:`binary restart files <restart>`.  Thus, you need to re-specify the pair_style and
 pair_coeff commands in an input script that reads a restart file.
 
-This style can only be used via the *pair* keyword of the :doc:`run_style respa <run_style>` command.  It does not support the *inner*\ ,
-*middle*\ , *outer* keywords.
+This style can only be used via the *pair* keyword of the :doc:`run_style respa <run_style>` command.  It does not support the *inner*,
+*middle*, *outer* keywords.
 
 Restrictions
 """"""""""""
 
-This pair style is part of the USER-SPH package.  It is only enabled
-if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` doc page for more info.
+This pair style is part of the SPH package.  It is only enabled
+if LAMMPS was built with that package.  See the :doc:`Build package <Build_package>` page for more info.
 
 Related commands
 """"""""""""""""

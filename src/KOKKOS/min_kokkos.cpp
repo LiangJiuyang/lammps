@@ -1,7 +1,8 @@
+// clang-format off
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -20,6 +21,7 @@
 #include "angle.h"
 #include "atom_kokkos.h"
 #include "atom_masks.h"
+#include "atom_vec.h"
 #include "bond.h"
 #include "comm.h"
 #include "compute.h"
@@ -54,16 +56,12 @@ MinKokkos::MinKokkos(LAMMPS *lmp) : Min(lmp)
 
 /* ---------------------------------------------------------------------- */
 
-MinKokkos::~MinKokkos()
-{
-
-}
-
-/* ---------------------------------------------------------------------- */
-
 void MinKokkos::init()
 {
   Min::init();
+
+  if (!fix_minimize->kokkosable)
+    error->all(FLERR,"KOKKOS package requires fix minimize/kk");
 
   fix_minimize_kk = (FixMinimizeKokkos*) fix_minimize;
 }
@@ -75,15 +73,16 @@ void MinKokkos::init()
 void MinKokkos::setup(int flag)
 {
   if (comm->me == 0 && screen) {
-    fmt::print(screen,"Setting up {} style minimization ...\n",
-               update->minimize_style);
+    utils::print(screen,"Setting up {} style minimization ...\n", update->minimize_style);
     if (flag) {
-      fmt::print(screen,"  Unit style    : {}\n", update->unit_style);
-      fmt::print(screen,"  Current step  : {}\n", update->ntimestep);
+      utils::print(screen,"  Unit style    : {}\n", update->unit_style);
+      utils::print(screen,"  Current step  : {}\n", update->ntimestep);
       timer->print_timeout(screen);
     }
   }
   update->setupflag = 1;
+
+  lmp->kokkos->auto_sync = 1;
 
   // setup extra global dof due to fixes
   // cannot be done in init() b/c update init() is before modify init()
@@ -91,16 +90,15 @@ void MinKokkos::setup(int flag)
   nextra_global = modify->min_dof();
   if (nextra_global) {
     fextra = new double[nextra_global];
-    if (comm->me == 0 && screen)
-      fprintf(screen,"WARNING: Energy due to %d extra global DOFs will"
-              " be included in minimizer energies\n",nextra_global);
+    if (comm->me == 0)
+      error->warning(FLERR, "Energy due to {} extra global DOFs will"
+                     " be included in minimizer energies\n",nextra_global);
   }
 
   // compute for potential energy
 
-  int id = modify->find_compute("thermo_pe");
-  if (id < 0) error->all(FLERR,"Minimization could not find thermo_pe compute");
-  pe_compute = modify->compute[id];
+  pe_compute = modify->get_compute_by_id("thermo_pe");
+  if (!pe_compute) error->all(FLERR,"Minimization could not find thermo_pe compute");
 
   // style-specific setup does two tasks
   // setup extra global dof vectors
@@ -174,9 +172,9 @@ void MinKokkos::setup(int flag)
     force->pair->compute(eflag,vflag);
     atomKK->modified(force->pair->execution_space,force->pair->datamask_modify);
   }
-  else if (force->pair) force->pair->compute_dummy(eflag,vflag);
+  else if (force->pair) force->pair->compute_dummy(eflag,vflag,0);
 
-  if (atomKK->molecular) {
+  if (atom->molecular != Atom::ATOMIC) {
     if (force->bond) {
       atomKK->sync(force->bond->execution_space,force->bond->datamask_read);
       force->bond->compute(eflag,vflag);
@@ -205,7 +203,7 @@ void MinKokkos::setup(int flag)
       atomKK->sync(force->kspace->execution_space,force->kspace->datamask_read);
       force->kspace->compute(eflag,vflag);
       atomKK->modified(force->kspace->execution_space,force->kspace->datamask_modify);
-    } else force->kspace->compute_dummy(eflag,vflag);
+    } else force->kspace->compute_dummy(eflag,vflag,0);
   }
 
   modify->setup_pre_reverse(eflag,vflag);
@@ -248,6 +246,8 @@ void MinKokkos::setup_minimal(int flag)
   // acquire ghosts
   // build neighbor lists
 
+  lmp->kokkos->auto_sync = 1;
+
   if (flag) {
     modify->setup_pre_exchange();
     if (triclinic) domain->x2lamda(atom->nlocal);
@@ -281,9 +281,9 @@ void MinKokkos::setup_minimal(int flag)
     force->pair->compute(eflag,vflag);
     atomKK->modified(force->pair->execution_space,force->pair->datamask_modify);
   }
-  else if (force->pair) force->pair->compute_dummy(eflag,vflag);
+  else if (force->pair) force->pair->compute_dummy(eflag,vflag,0);
 
-  if (atomKK->molecular) {
+  if (atom->molecular != Atom::ATOMIC) {
     if (force->bond) {
       atomKK->sync(force->bond->execution_space,force->bond->datamask_read);
       force->bond->compute(eflag,vflag);
@@ -312,7 +312,7 @@ void MinKokkos::setup_minimal(int flag)
       atomKK->sync(force->kspace->execution_space,force->kspace->datamask_read);
       force->kspace->compute(eflag,vflag);
       atomKK->modified(force->kspace->execution_space,force->kspace->datamask_modify);
-    } else force->kspace->compute_dummy(eflag,vflag);
+    } else force->kspace->compute_dummy(eflag,vflag,0);
   }
 
   modify->setup_pre_reverse(eflag,vflag);
@@ -347,7 +347,7 @@ void MinKokkos::setup_minimal(int flag)
 void MinKokkos::run(int n)
 {
   if (nextra_atom)
-    error->all(FLERR,"Cannot yet use extra atom DOFs (e.g. USER-AWPMD and USER-EFF packages) "
+    error->all(FLERR,"Cannot yet use extra atom DOFs (e.g. AWPMD and EFF packages) "
      "with Kokkos minimize");
 
   // minimizer iterations
@@ -361,7 +361,7 @@ void MinKokkos::run(int n)
   // if early exit from iterate loop:
   // set update->nsteps to niter for Finish stats to print
   // set output->next values to this timestep
-  // call energy_force() to insure vflag is set when forces computed
+  // call energy_force() to ensure vflag is set when forces computed
   // output->write does final output for thermo, dump, restart files
   // add ntimestep to all computes that store invocation times
   //   since are hardwiring call to thermo/dumps and computes may not be ready
@@ -501,6 +501,7 @@ double MinKokkos::energy_force(int resetflag)
   if (force->newton) {
     comm->reverse_comm();
     timer->stamp(Timer::COMM);
+    atomKK->sync(Device,F_MASK);
   }
 
   // update per-atom minimization variables stored by pair styles
@@ -514,6 +515,7 @@ double MinKokkos::energy_force(int resetflag)
   if (modify->n_min_post_force) {
      timer->stamp();
      modify->min_post_force(vflag);
+     atomKK->sync(Device,F_MASK);
      timer->stamp(Timer::MODIFY);
   }
 
@@ -534,6 +536,7 @@ double MinKokkos::energy_force(int resetflag)
     if (resetflag) fix_minimize_kk->reset_coords();
     reset_vectors();
   }
+
   return energy;
 }
 
@@ -558,8 +561,8 @@ void MinKokkos::force_clear()
   if (nzero) {
     // local variables for lambda capture
 
-    auto l_f = atomKK->k_f.d_view;
-    auto l_torque = atomKK->k_torque.d_view;
+    auto l_f = atomKK->k_f.view_device();
+    auto l_torque = atomKK->k_torque.view_device();
     auto l_torqueflag = torqueflag;
 
     Kokkos::parallel_for(nzero, LAMMPS_LAMBDA(int i) {
@@ -572,8 +575,15 @@ void MinKokkos::force_clear()
         l_torque(i,2) = 0.0;
       }
     });
+
+    if (extraflag) {
+      size_t nbytes = sizeof(double) * atom->nlocal;
+      if (force->newton) nbytes += sizeof(double) * atom->nghost;
+      atom->avec->force_clear(0,nbytes);
+    }
   }
-  atomKK->modified(Device,F_MASK);
+
+  atomKK->modified(Device,F_MASK|TORQUE_MASK);
 }
 
 /* ----------------------------------------------------------------------
@@ -582,16 +592,25 @@ void MinKokkos::force_clear()
 
 double MinKokkos::fnorm_sqr()
 {
+  atomKK->sync(Device,F_MASK);
 
   double local_norm2_sqr = 0.0;
   {
     // local variables for lambda capture
 
-    auto l_fvec = fvec;
-
-    Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm2_sqr) {
-      local_norm2_sqr += l_fvec[i]*l_fvec[i];
-    },local_norm2_sqr);
+    if constexpr (F_LAYOUTRIGHT) {
+      auto l_fvec = fvec;
+      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm2_sqr) {
+        local_norm2_sqr += l_fvec[i]*l_fvec[i];
+      },local_norm2_sqr);
+    } else {
+      auto l_f = atomKK->k_f.view_device();
+      Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(int i, double& local_norm2_sqr) {
+        local_norm2_sqr += l_f(i,0)*l_f(i,0);
+        local_norm2_sqr += l_f(i,1)*l_f(i,1);
+        local_norm2_sqr += l_f(i,2)*l_f(i,2);
+      },local_norm2_sqr);
+    }
   }
 
   double norm2_sqr = 0.0;
@@ -610,16 +629,25 @@ double MinKokkos::fnorm_sqr()
 
 double MinKokkos::fnorm_inf()
 {
+  atomKK->sync(Device,F_MASK);
 
   double local_norm_inf = 0.0;
   {
     // local variables for lambda capture
 
-    auto l_fvec = fvec;
-
-    Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm_inf) {
-      local_norm_inf = MAX(l_fvec[i]*l_fvec[i],local_norm_inf);
-    },Kokkos::Max<double>(local_norm_inf));
+    if constexpr (F_LAYOUTRIGHT) {
+      auto l_fvec = fvec;
+      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm_inf) {
+        local_norm_inf = MAX(l_fvec[i]*l_fvec[i],local_norm_inf);
+      },Kokkos::Max<double>(local_norm_inf));
+    } else {
+      auto l_f = atomKK->k_f.view_device();
+      Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(int i, double& local_norm_inf) {
+        local_norm_inf = MAX(l_f(i,0)*l_f(i,0),local_norm_inf);
+        local_norm_inf = MAX(l_f(i,1)*l_f(i,1),local_norm_inf);
+        local_norm_inf = MAX(l_f(i,2)*l_f(i,2),local_norm_inf);
+      },Kokkos::Max<double>(local_norm_inf));
+    }
   }
 
   double norm_inf = 0.0;
@@ -638,17 +666,25 @@ double MinKokkos::fnorm_inf()
 
 double MinKokkos::fnorm_max()
 {
+  atomKK->sync(Device,F_MASK);
 
   double local_norm_max = 0.0;
   {
     // local variables for lambda capture
 
-    auto l_fvec = fvec;
-
-    Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm_max) {
-      double fdotf = l_fvec[i]*l_fvec[i]+l_fvec[i+1]*l_fvec[i+1]+l_fvec[i+2]*l_fvec[i+2];
-      local_norm_max = MAX(fdotf,local_norm_max);
-    },Kokkos::Max<double>(local_norm_max));
+    if constexpr (F_LAYOUTRIGHT) {
+      auto l_fvec = fvec;
+      Kokkos::parallel_reduce(nvec, LAMMPS_LAMBDA(int i, double& local_norm_max) {
+        double fdotf = l_fvec[i]*l_fvec[i]+l_fvec[i+1]*l_fvec[i+1]+l_fvec[i+2]*l_fvec[i+2];
+        local_norm_max = MAX(fdotf,local_norm_max);
+      },Kokkos::Max<double>(local_norm_max));
+    } else {
+      auto l_f = atomKK->k_f.view_device();
+      Kokkos::parallel_reduce(atom->nlocal, LAMMPS_LAMBDA(int i, double& local_norm_max) {
+        double fdotf = l_f(i,0)*l_f(i,0)+l_f(i,1)*l_f(i,1)+l_f(i,2)*l_f(i,2);
+        local_norm_max = MAX(fdotf,local_norm_max);
+      },Kokkos::Max<double>(local_norm_max));
+    }
   }
 
   double norm_max = 0.0;

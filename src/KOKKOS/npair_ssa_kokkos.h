@@ -1,7 +1,7 @@
 /* -*- c++ -*- ----------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://lammps.sandia.gov/, Sandia National Laboratories
-   Steve Plimpton, sjplimp@sandia.gov
+   https://www.lammps.org/, Sandia National Laboratories
+   LAMMPS development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
    DE-AC04-94AL85000 with Sandia Corporation, the U.S. Government retains
@@ -12,19 +12,20 @@
 ------------------------------------------------------------------------- */
 
 #ifdef NPAIR_CLASS
-
-typedef NPairSSAKokkos<LMPHostType> NPairSSAKokkosHost;
+// clang-format off
+using NPairSSAKokkosHost = NPairSSAKokkos<LMPHostType>;
 NPairStyle(half/bin/newton/ssa/kk/host,
            NPairSSAKokkosHost,
-           NP_HALF | NP_BIN | NP_NEWTON | NP_ORTHO | NP_SSA | NP_GHOST | NP_KOKKOS_HOST)
+           NP_HALF | NP_BIN | NP_NEWTON | NP_ORTHO | NP_SSA | NP_GHOST | NP_KOKKOS_HOST);
 
-typedef NPairSSAKokkos<LMPDeviceType> NPairSSAKokkosDevice;
+using NPairSSAKokkosDevice = NPairSSAKokkos<LMPDeviceType>;
 NPairStyle(half/bin/newton/ssa/kk/device,
            NPairSSAKokkosDevice,
-           NP_HALF | NP_BIN | NP_NEWTON | NP_ORTHO | NP_SSA | NP_GHOST | NP_KOKKOS_DEVICE)
-
+           NP_HALF | NP_BIN | NP_NEWTON | NP_ORTHO | NP_SSA | NP_GHOST | NP_KOKKOS_DEVICE);
+// clang-format on
 #else
 
+// clang-format off
 #ifndef LMP_NPAIR_SSA_KOKKOS_H
 #define LMP_NPAIR_SSA_KOKKOS_H
 
@@ -58,21 +59,19 @@ class NPairSSAKokkos : public NPair {
   typename AT::t_int_2d ssa_gitemLen;
 
   NPairSSAKokkos(class LAMMPS *);
-  ~NPairSSAKokkos() {}
-  void copy_neighbor_info();
-  void copy_bin_info();
-  void copy_stencil_info();
-  void build(class NeighList *);
+  void copy_neighbor_info() override;
+  void copy_bin_info() override;
+  void copy_stencil_info() override;
+  void build(class NeighList *) override;
  private:
   // data from Neighbor class
 
-  DAT::tdual_xfloat_2d k_cutneighsq;
+  DAT::ttransform_kkfloat_2d k_cutneighsq;
 
   // exclusion data from Neighbor class
 
   DAT::tdual_int_1d k_ex1_type,k_ex2_type;
-  DAT::tdual_int_2d k_ex_type;
-  DAT::tdual_int_1d k_ex1_group,k_ex2_group;
+  DAT::ttransform_int_2d k_ex_type;
   DAT::tdual_int_1d k_ex1_bit,k_ex2_bit;
   DAT::tdual_int_1d k_ex_mol_group;
   DAT::tdual_int_1d k_ex_mol_bit;
@@ -107,7 +106,7 @@ class NPairSSAKokkosExecute
 
   // data from Neighbor class
 
-  const typename AT::t_xfloat_2d_randomread cutneighsq;
+  const typename AT::t_kkfloat_2d_randomread cutneighsq;
 
   // exclusion data from Neighbor class
 
@@ -118,7 +117,6 @@ class NPairSSAKokkosExecute
   const typename AT::t_int_2d_const ex_type;
 
   const int nex_group;
-  const typename AT::t_int_1d_const ex1_group,ex2_group;
   const typename AT::t_int_1d_const ex1_bit,ex2_bit;
 
   const int nex_mol;
@@ -149,7 +147,7 @@ class NPairSSAKokkosExecute
 
   // data from Atom class
 
-  const typename AT::t_x_array_randomread x;
+  const typename AT::t_kkfloat_1d_3_lr_randomread x;
   const typename AT::t_int_1d_const type,mask;
   const typename AT::t_tagint_1d_const molecule;
   const typename AT::t_tagint_1d_const tag;
@@ -163,15 +161,15 @@ class NPairSSAKokkosExecute
   const int nbinx,nbiny,nbinz;
   const int mbinx,mbiny,mbinz;
   const int mbinxlo,mbinylo,mbinzlo;
-  const X_FLOAT bininvx,bininvy,bininvz;
-  X_FLOAT bboxhi[3],bboxlo[3];
+  const double bininvx,bininvy,bininvz;
+  double bboxhi[3],bboxlo[3];
 
   const int nlocal;
 
   typename AT::t_int_scalar resize;
   typename AT::t_int_scalar new_maxneighs;
-  typename ArrayTypes<LMPHostType>::t_int_scalar h_resize;
-  typename ArrayTypes<LMPHostType>::t_int_scalar h_new_maxneighs;
+  HAT::t_int_scalar h_resize;
+  HAT::t_int_scalar h_new_maxneighs;
 
   const int xperiodic, yperiodic, zperiodic;
   const int xprd_half, yprd_half, zprd_half;
@@ -189,7 +187,7 @@ class NPairSSAKokkosExecute
 
   NPairSSAKokkosExecute(
         const NeighListKokkos<DeviceType> &_neigh_list,
-        const typename AT::t_xfloat_2d_randomread &_cutneighsq,
+        const typename AT::t_kkfloat_2d_randomread &_cutneighsq,
         const typename AT::t_int_1d &_bincount,
         const typename AT::t_int_2d &_bins,
         const typename AT::t_int_1d &_gbincount,
@@ -211,7 +209,7 @@ class NPairSSAKokkosExecute
         const typename AT::t_int_2d &_d_ssa_gitemLoc,
         const typename AT::t_int_2d &_d_ssa_gitemLen,
         const int _nlocal,
-        const typename AT::t_x_array_randomread &_x,
+        const typename AT::t_kkfloat_1d_3_lr_randomread &_x,
         const typename AT::t_int_1d_const &_type,
         const typename AT::t_int_1d_const &_mask,
         const typename AT::t_tagint_1d_const &_molecule,
@@ -222,28 +220,25 @@ class NPairSSAKokkosExecute
         const int & _nbinx,const int & _nbiny,const int & _nbinz,
         const int & _mbinx,const int & _mbiny,const int & _mbinz,
         const int & _mbinxlo,const int & _mbinylo,const int & _mbinzlo,
-        const X_FLOAT &_bininvx,const X_FLOAT &_bininvy,const X_FLOAT &_bininvz,
+        const double &_bininvx,const double &_bininvy,const double &_bininvz,
         const int & _exclude,const int & _nex_type,
         const typename AT::t_int_1d_const & _ex1_type,
         const typename AT::t_int_1d_const & _ex2_type,
         const typename AT::t_int_2d_const & _ex_type,
         const int & _nex_group,
-        const typename AT::t_int_1d_const & _ex1_group,
-        const typename AT::t_int_1d_const & _ex2_group,
         const typename AT::t_int_1d_const & _ex1_bit,
         const typename AT::t_int_1d_const & _ex2_bit,
         const int & _nex_mol,
         const typename AT::t_int_1d_const & _ex_mol_group,
         const typename AT::t_int_1d_const & _ex_mol_bit,
         const typename AT::t_int_1d_const & _ex_mol_intra,
-        const X_FLOAT *_bboxhi, const X_FLOAT* _bboxlo,
+        const double *_bboxhi, const double* _bboxlo,
         const int & _xperiodic, const int & _yperiodic, const int & _zperiodic,
         const int & _xprd_half, const int & _yprd_half, const int & _zprd_half):
     neigh_list(_neigh_list), cutneighsq(_cutneighsq),
     exclude(_exclude),nex_type(_nex_type),
     ex1_type(_ex1_type),ex2_type(_ex2_type),ex_type(_ex_type),
     nex_group(_nex_group),
-    ex1_group(_ex1_group),ex2_group(_ex2_group),
     ex1_bit(_ex1_bit),ex2_bit(_ex2_bit),nex_mol(_nex_mol),
     ex_mol_group(_ex_mol_group),ex_mol_bit(_ex_mol_bit),
     ex_mol_intra(_ex_mol_intra),
@@ -292,13 +287,13 @@ class NPairSSAKokkosExecute
   ~NPairSSAKokkosExecute() {neigh_list.copymode = 1;};
 
   KOKKOS_FUNCTION
-  void build_locals_onePhase(const bool firstTry, int me, int workPhase) const;
+  void build_locals_onePhase(const bool firstTry, int workPhase) const;
 
   KOKKOS_FUNCTION
   void build_ghosts_onePhase(int workPhase) const;
 
   KOKKOS_INLINE_FUNCTION
-  int coord2bin(const X_FLOAT & x,const X_FLOAT & y,const X_FLOAT & z, int* i) const
+  int coord2bin(const double & x,const double & y,const double & z, int* i) const
   {
     int ix,iy,iz;
 
@@ -354,6 +349,3 @@ class NPairSSAKokkosExecute
 #endif
 #endif
 
-/* ERROR/WARNING messages:
-
-*/
