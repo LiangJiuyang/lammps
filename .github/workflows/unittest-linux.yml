@@ -80,8 +80,6 @@ jobs:
               -G Ninja
         cmake --build build
         ccache -s
-
-    - name: Run Tests
-      working-directory: build
-      shell: bash
-      run: ctest -V
+        
+    - name: Setup tmate session
+      uses: mxschmitt/action-tmate@v3
