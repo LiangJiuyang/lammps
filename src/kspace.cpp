@@ -222,12 +222,12 @@ bool KSpace::update_auto_slab_volfactor(double alpha, double xprd, double yprd, 
   if (!(slabflag == 1 && slab_auto)) return false;
   if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
 
-  const double epsilon = accuracy / two_charge_force;
-  if (!(epsilon > 0.0 && epsilon < 1.0))
+  const double force_accuracy = accuracy;
+  if (!(force_accuracy > 0.0 && force_accuracy < 1.0))
     error->all(FLERR,
-               "kspace_modify slab auto requires a relative force accuracy between 0 and 1");
+               "kspace_modify slab auto requires an absolute force accuracy between 0 and 1");
 
-  const double logeps = log(1.0 / epsilon);
+  const double logeps = log(1.0 / force_accuracy);
   const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
   const double reciprocal = sqrt(logeps) / alpha;
   const double lz = zprd + MAX(lateral, reciprocal);

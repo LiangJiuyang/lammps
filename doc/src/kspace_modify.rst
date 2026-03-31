@@ -53,7 +53,7 @@ Syntax
          volfactor = ratio of the total extended volume used in the
            2d approximation compared with the volume of the simulation domain
          *auto* chooses the extended z dimension from the current
-           relative force accuracy, lateral box dimensions, and G-ewald
+           absolute force accuracy, lateral box dimensions, and G-ewald
          *nozforce* turns off kspace forces in the z direction
        *splittol* value = tol
          tol = relative size of two eigenvalues (see discussion below)
@@ -416,7 +416,7 @@ option is also extended to non-neutral systems :ref:`(Ballenegger)
 
 As an alternative to specifying a fixed volfactor, the keyword
 *auto* can be used to determine the extended z dimension from the
-current relative force accuracy, the lateral dimensions of the
+current absolute force accuracy, the lateral dimensions of the
 simulation cell, and the active Coulombic G-ewald parameter.  This is
 useful for quasi-2D systems where the amount of extra vacuum required
 for the slab correction depends on both the requested tolerance and
