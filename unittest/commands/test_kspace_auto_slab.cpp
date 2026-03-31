@@ -10,7 +10,7 @@
 
    See the README file in the top-level LAMMPS directory.
 
-   Contributing authors: Jiuyang Liang and Xuanzhao Gao (TODO: add long-lived e-mail(s) for final submission)
+   Contributing authors: Jiuyang Liang and Xuanzhao Gao (Flatiron Institute)
 ------------------------------------------------------------------------- */
 
 #include "domain.h"

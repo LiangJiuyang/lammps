@@ -423,8 +423,10 @@ for the slab correction depends on both the requested tolerance and
 the box geometry.  The automatic choice is not artificially clamped
 above 1.0, so it can in principle approach the original box size if
 the formula permits.  The quasi-2D error estimate used for the
-automatic choice is discussed in :ref:`(Gan2025) <Gan2025>`.  The
-*auto* setting is currently supported by
+automatic choice is discussed in :ref:`(Gan2025) <Gan2025>`.  For
+related error estimates and parameter-selection guidance in the more
+general dielectric-confined setting, see :ref:`(Gao2025) <Gao2025>`.
+The *auto* setting is currently supported by
 :doc:`kspace_style <kspace_style>` *ewald*, *pppm*,
 *pppm/cg*, *pppm/tip4p*, *pppm/stagger*, and the corresponding
 OpenMP/GPU/Intel variants that reuse the same slab-correction setup.
@@ -531,6 +533,11 @@ Adam Hilger, NY (1989).
 .. _Klapp:
 
 **(Klapp)** Klapp, Schoen, J Chem Phys, 117, 8050 (2002).
+
+.. _Gao2025:
+
+**(Gao2025)** Gao, Zhou, Gan, Liang, J Chem Theory Comput, 21,
+5890-5904 (2025). https://doi.org/10.1021/acs.jctc.5c00438
 
 .. _Gan2025:
 
