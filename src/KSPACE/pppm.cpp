@@ -70,6 +70,7 @@ PPPM::PPPM(LAMMPS *lmp) : KSpace(lmp),
   pppmflag = 1;
   group_group_enable = 1;
   triclinic = domain->triclinic;
+  g_ewald_ready = 0;
 
   nfactors = 3;
   factors = new int[nfactors];
@@ -279,6 +280,21 @@ void PPPM::init()
   if (peratom_allocate_flag) deallocate_peratom();
   if (group_allocate_flag) deallocate_groups();
 
+  const double xprd = domain->xprd;
+  const double yprd = domain->yprd;
+  const double zprd = domain->zprd;
+  bigint natoms = atom->natoms;
+  if (natoms == 0) natoms = 1;
+
+  g_ewald_ready = 0;
+  if (!gewaldflag) {
+    g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
+    g_ewald_ready = 1;
+  }
+
+  const bool slab_auto_enabled = (slabflag == 1 && slab_auto);
+  if (slab_auto_enabled) update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
+
   // setup FFT grid resolution and g_ewald
   // normally one iteration thru while loop is all that is required
   // if grid stencil does not extend beyond neighbor proc
@@ -286,48 +302,68 @@ void PPPM::init()
   // else reduce order and try again
 
   gc = nullptr;
-  int iteration = 0;
+  const int requested_order = order;
+  int slab_iterations = 0;
 
-  while (order >= minorder) {
-    if (iteration && me == 0)
-      error->warning(FLERR,"Reducing PPPM order b/c stencil extends "
-                     "beyond nearest neighbor processor");
+  while (true) {
+    int iteration = 0;
+    order = requested_order;
 
-    if (stagger_flag && !differentiation_flag) compute_gf_denom();
-    set_grid_global();
-    set_grid_local();
-    if (overlap_allowed) break;
+    while (order >= minorder) {
+      if (iteration && me == 0)
+        error->warning(FLERR,"Reducing PPPM order b/c stencil extends "
+                       "beyond nearest neighbor processor");
 
-    gc = new Grid3d(lmp,world,nx_pppm,ny_pppm,nz_pppm);
-    gc->set_distance(0.5*neighbor->skin + qdist);
-    gc->set_stencil_atom(-nlower,nupper);
-    gc->set_shift_atom(shiftatom_lo,shiftatom_hi);
-    gc->set_zfactor(slab_volfactor);
+      if (stagger_flag && !differentiation_flag) compute_gf_denom();
+      set_grid_global();
+      set_grid_local();
+      if (overlap_allowed) break;
 
-    gc->setup_grid(nxlo_in,nxhi_in,nylo_in,nyhi_in,nzlo_in,nzhi_in,
-                   nxlo_out,nxhi_out,nylo_out,nyhi_out,nzlo_out,nzhi_out);
+      gc = new Grid3d(lmp,world,nx_pppm,ny_pppm,nz_pppm);
+      gc->set_distance(0.5*neighbor->skin + qdist);
+      gc->set_stencil_atom(-nlower,nupper);
+      gc->set_shift_atom(shiftatom_lo,shiftatom_hi);
+      gc->set_zfactor(slab_volfactor);
 
-    int tmp1,tmp2;
-    gc->setup_comm(tmp1,tmp2);
-    if (gc->ghost_adjacent()) break;
-    delete gc;
+      gc->setup_grid(nxlo_in,nxhi_in,nylo_in,nyhi_in,nzlo_in,nzhi_in,
+                     nxlo_out,nxhi_out,nylo_out,nyhi_out,nzlo_out,nzhi_out);
 
-    order--;
-    iteration++;
+      int tmp1,tmp2;
+      gc->setup_comm(tmp1,tmp2);
+      if (gc->ghost_adjacent()) break;
+      delete gc;
+      gc = nullptr;
+
+      order--;
+      iteration++;
+    }
+
+    if (order < minorder) error->all(FLERR,"PPPM order < minimum allowed order");
+    if (!overlap_allowed && !gc->ghost_adjacent())
+      error->all(FLERR,"PPPM grid stencil extends beyond nearest neighbor processor");
+    if (gc) {
+      delete gc;
+      gc = nullptr;
+    }
+
+    // adjust g_ewald
+
+    if (!gewaldflag) adjust_gewald();
+    if (!slab_auto_enabled) break;
+
+    const double old_slab_volfactor = slab_volfactor;
+    update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
+    if (fabs(slab_volfactor - old_slab_volfactor) <= SMALL * slab_volfactor) break;
+
+    slab_iterations++;
+    if (slab_iterations > 5)
+      error->all(FLERR, "Could not converge kspace_modify slab auto");
   }
-
-  if (order < minorder) error->all(FLERR,"PPPM order < minimum allowed order");
-  if (!overlap_allowed && !gc->ghost_adjacent())
-    error->all(FLERR,"PPPM grid stencil extends beyond nearest neighbor processor");
-  if (gc) delete gc;
-
-  // adjust g_ewald
-
-  if (!gewaldflag) adjust_gewald();
 
   // calculate the final accuracy
 
   double estimated_accuracy = final_accuracy();
+  g_ewald_ready = 0;
 
   // allocate K-space dependent memory
   // don't invoke allocate peratom() or group(), will be allocated when needed
@@ -351,6 +387,10 @@ void PPPM::init()
     std::string mesg = fmt::format("  G vector (1/distance) = {:.8g}\n",g_ewald);
     mesg += fmt::format("  grid = {} {} {}\n",nx_pppm,ny_pppm,nz_pppm);
     mesg += fmt::format("  stencil order = {}\n",order);
+    if (slabflag == 1 && slab_auto) {
+      mesg += fmt::format("  auto slab volfactor = {:.8g}\n", slab_volfactor);
+      mesg += fmt::format("  auto slab extended z = {:.8g}\n", zprd * slab_volfactor);
+    }
     mesg += fmt::format("  estimated absolute RMS force accuracy = {:.8g}\n",
                        estimated_accuracy);
     mesg += fmt::format("  estimated relative force accuracy = {:.8g}\n",
@@ -984,16 +1024,9 @@ void PPPM::set_grid_global()
 
   double h;
   bigint natoms = atom->natoms;
+  if (natoms == 0) natoms = 1;
 
-  if (!gewaldflag) {
-    if (accuracy <= 0.0)
-      error->all(FLERR,"KSpace accuracy must be > 0");
-    if (q2 == 0.0)
-      error->all(FLERR,"Must use kspace_modify gewald for uncharged system");
-    g_ewald = accuracy*sqrt(natoms*cutoff*xprd*yprd*zprd) / (2.0*q2);
-    if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
-    else g_ewald = sqrt(-log(g_ewald)) / cutoff;
-  }
+  if (!gewaldflag && !g_ewald_ready) g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
 
   // set optimal nx_pppm,ny_pppm,nz_pppm based on order and accuracy
   // nz_pppm uses extended zprd_slab instead of zprd

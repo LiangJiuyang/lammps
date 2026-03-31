@@ -88,6 +88,7 @@ class KSpace : protected Pointers {
                             // for LJ coefficients
   bool conp_one_step;       // calculate A matrix in one step with pppm
   int slabflag, wireflag;
+  int slab_auto;
   int scalar_pressure_flag;    // 1 if using MSM fast scalar pressure
   double slab_volfactor, wire_volfactor;
 
@@ -249,6 +250,8 @@ class KSpace : protected Pointers {
           vflag_global = vflag_atom = 0;
   }
   void ev_setup(int, int, int alloc = 1);
+  double estimate_gewald(double, double, double, double, bigint) const;
+  bool update_auto_slab_volfactor(double, double, double, double);
   double estimate_table_accuracy(double, double);
 };
 

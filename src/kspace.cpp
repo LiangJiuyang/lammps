@@ -20,6 +20,7 @@
 #include "domain.h"
 #include "error.h"
 #include "force.h"
+#include "math_const.h"
 #include "memory.h"
 #include "pair.h"
 #include "suffix.h"
@@ -28,8 +29,25 @@
 #include <cstring>
 
 using namespace LAMMPS_NS;
+using namespace MathConst;
 
 static constexpr double SMALL = 0.00001;
+static constexpr double MIN_AUTO_SLAB_VOLFACTOR = 1.0;
+
+namespace {
+
+bool supports_auto_slab(const char *style)
+{
+  if (style == nullptr) return false;
+  return (strcmp(style, "ewald") == 0) || (strcmp(style, "ewald/omp") == 0) ||
+      (strcmp(style, "pppm") == 0) || (strcmp(style, "pppm/omp") == 0) ||
+      (strcmp(style, "pppm/gpu") == 0) || (strcmp(style, "pppm/intel") == 0) ||
+      (strcmp(style, "pppm/cg") == 0) || (strcmp(style, "pppm/cg/omp") == 0) ||
+      (strcmp(style, "pppm/tip4p") == 0) || (strcmp(style, "pppm/tip4p/omp") == 0) ||
+      (strcmp(style, "pppm/stagger") == 0);
+}
+
+}    // namespace
 
 /* ---------------------------------------------------------------------- */
 
@@ -71,6 +89,7 @@ KSpace::KSpace(LAMMPS *lmp) :
 
   conp_one_step = true;
   slabflag = wireflag = 0;
+  slab_auto = 0;
   differentiation_flag = 0;
   slab_volfactor = 1;
   wire_volfactor = 1;
@@ -173,6 +192,50 @@ void KSpace::two_charge()
   two_charge_force = force->qqr2e *
     (force->qelectron * force->qelectron) /
     (force->angstrom * force->angstrom);
+}
+
+/* ----------------------------------------------------------------------
+   estimate the Ewald splitting parameter used by Ewald/PPPM
+------------------------------------------------------------------------- */
+
+double KSpace::estimate_gewald(double cutoff, double xprd, double yprd, double zprd,
+                               bigint natoms) const
+{
+  if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
+  if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
+
+  double gewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
+  if (gewald >= 1.0)
+    gewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
+  else
+    gewald = sqrt(-log(gewald)) / cutoff;
+
+  return gewald;
+}
+
+/* ----------------------------------------------------------------------
+   select slab volfactor from the homogeneous quasi-2D error estimate
+------------------------------------------------------------------------- */
+
+bool KSpace::update_auto_slab_volfactor(double alpha, double xprd, double yprd, double zprd)
+{
+  if (!(slabflag == 1 && slab_auto)) return false;
+  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
+
+  const double epsilon = accuracy / two_charge_force;
+  if (!(epsilon > 0.0 && epsilon < 1.0))
+    error->all(FLERR,
+               "kspace_modify slab auto requires a relative force accuracy between 0 and 1");
+
+  const double logeps = log(1.0 / epsilon);
+  const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
+  const double reciprocal = sqrt(logeps) / alpha;
+  const double lz = zprd + MAX(lateral, reciprocal);
+  const double new_volfactor = MAX(lz / zprd, MIN_AUTO_SLAB_VOLFACTOR);
+  const bool changed = fabs(new_volfactor - slab_volfactor) > SMALL * new_volfactor;
+
+  slab_volfactor = new_volfactor;
+  return changed;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -506,16 +569,28 @@ void KSpace::modify_params(int narg, char **arg)
       if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"kspace_modify slab", error);
       if (strcmp(arg[iarg+1],"nozforce") == 0) {
         slabflag = 2;
+        slab_auto = 0;
       } else if (strcmp(arg[iarg+1],"ew2d") == 0) {
         slabflag = 3;
+        slab_auto = 0;
+      } else if (strcmp(arg[iarg+1],"auto") == 0) {
+        if (!supports_auto_slab(force->kspace_style))
+          error->all(FLERR, iarg + 1,
+                     "kspace_modify slab auto is not supported by kspace style {}",
+                     force->kspace_style);
+        slabflag = 1;
+        slab_auto = 1;
+        slab_volfactor = 1.0;
       } else {
         slabflag = 1;
+        slab_auto = 0;
         slab_volfactor = utils::numeric(FLERR,arg[iarg+1],false,lmp);
         if (slab_volfactor <= 1.0)
           error->all(FLERR, iarg + 1, "Bad kspace_modify slab parameter");
         if (slab_volfactor < 2.0 && comm->me == 0)
           error->warning(FLERR,"Kspace_modify slab param < 2.0 may cause unphysical behavior");
       }
+      status = true;
       iarg += 2;
     } else if (strcmp(arg[iarg],"wire") == 0) {
       if (iarg+2 > narg) utils::missing_cmd_args(FLERR,"kspace_modify wire", error);
@@ -632,6 +707,12 @@ void KSpace::modify_params(int narg, char **arg)
       mesg += fmt::format("  Gewald manually set to:          {}\n", g_ewald);
     } else {
       mesg += "  Gewald is determined automatically\n";
+    }
+    if (slabflag == 1) {
+      if (slab_auto)
+        mesg += "  Slab volfactor is determined automatically\n";
+      else
+        mesg += fmt::format("  Slab volfactor manually set to:    {}\n", slab_volfactor);
     }
     if (dispersionflag) {
       if (gewaldflag_6) {

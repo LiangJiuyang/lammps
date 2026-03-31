@@ -146,6 +146,7 @@ void Ewald::init()
   // setup K-space resolution
 
   bigint natoms = atom->natoms;
+  if (natoms == 0) natoms = 1;
 
   // use xprd,yprd,zprd even if triclinic so grid size is the same
   // adjust z dimension for 2d slab Ewald
@@ -154,22 +155,15 @@ void Ewald::init()
   double xprd = domain->xprd;
   double yprd = domain->yprd;
   double zprd = domain->zprd;
-  double zprd_slab = zprd*slab_volfactor;
 
   // make initial g_ewald estimate
   // based on desired accuracy and real space cutoff
   // fluid-occupied volume used to estimate real-space error
   // zprd used rather than zprd_slab
 
-  if (!gewaldflag) {
-    if (accuracy <= 0.0)
-      error->all(FLERR,"KSpace accuracy must be > 0");
-    if (q2 == 0.0)
-      error->all(FLERR,"Must use 'kspace_modify gewald' for uncharged system");
-    g_ewald = accuracy*sqrt(natoms*cutoff*xprd*yprd*zprd) / (2.0*q2);
-    if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
-    else g_ewald = sqrt(-log(g_ewald)) / cutoff;
-  }
+  if (!gewaldflag) g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
+  if (slabflag == 1 && slab_auto) update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
+  double zprd_slab = zprd*slab_volfactor;
 
   // setup Ewald coefficients so can print stats
 
@@ -190,6 +184,10 @@ void Ewald::init()
 
   if (comm->me == 0) {
     std::string mesg = fmt::format("  G vector (1/distance) = {:.8g}\n",g_ewald);
+    if (slabflag == 1 && slab_auto) {
+      mesg += fmt::format("  auto slab volfactor = {:.8g}\n", slab_volfactor);
+      mesg += fmt::format("  auto slab extended z = {:.8g}\n", zprd_slab);
+    }
     mesg += fmt::format("  estimated absolute RMS force accuracy = {:.8g}\n",
                        estimated_accuracy);
     mesg += fmt::format("  estimated relative force accuracy = {:.8g}\n",
