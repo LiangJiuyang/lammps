@@ -53,12 +53,12 @@ class KSpaceAutoSlabTest : public LAMMPSTest {
     command("pair_modify table 0");
   }
 
-  double expected_volfactor(double force_accuracy, double alpha) const
+  double expected_volfactor(double force_tolerance, double alpha) const
   {
     const double xprd = lmp->domain->xprd;
     const double yprd = lmp->domain->yprd;
     const double zprd = lmp->domain->zprd;
-    const double logeps = std::log(1.0 / force_accuracy);
+    const double logeps = std::log(1.0 / force_tolerance);
     const double lateral = std::max(xprd, yprd) * logeps / MY_2PI;
     const double reciprocal = std::sqrt(logeps) / alpha;
     return std::max((zprd + std::max(lateral, reciprocal)) / zprd, 1.0);
@@ -77,7 +77,10 @@ TEST_F(KSpaceAutoSlabTest, PPPMUsesPaperFormulaWithManualGewald)
   });
 
   ASSERT_NE(lmp->force->kspace, nullptr);
-  EXPECT_NEAR(lmp->force->kspace->slab_volfactor, expected_volfactor(lmp->force->kspace->accuracy, 0.3), 1.0e-12);
+  EXPECT_NEAR(lmp->force->kspace->slab_volfactor,
+              expected_volfactor(lmp->force->kspace->accuracy /
+                                     lmp->force->kspace->two_charge_force, 0.3),
+              1.0e-12);
 }
 
 TEST_F(KSpaceAutoSlabTest, EwaldUsesPaperFormulaWithManualGewald)
@@ -93,7 +96,10 @@ TEST_F(KSpaceAutoSlabTest, EwaldUsesPaperFormulaWithManualGewald)
   });
 
   ASSERT_NE(lmp->force->kspace, nullptr);
-  EXPECT_NEAR(lmp->force->kspace->slab_volfactor, expected_volfactor(lmp->force->kspace->accuracy, 0.3), 1.0e-12);
+  EXPECT_NEAR(lmp->force->kspace->slab_volfactor,
+              expected_volfactor(lmp->force->kspace->accuracy /
+                                     lmp->force->kspace->two_charge_force, 0.3),
+              1.0e-12);
 }
 
 }    // namespace LAMMPS_NS
