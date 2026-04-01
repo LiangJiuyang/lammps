@@ -20,7 +20,6 @@
 #include "domain.h"
 #include "error.h"
 #include "force.h"
-#include "math_const.h"
 #include "memory.h"
 #include "pair.h"
 #include "suffix.h"
@@ -29,10 +28,7 @@
 #include <cstring>
 
 using namespace LAMMPS_NS;
-using namespace MathConst;
-
 static constexpr double SMALL = 0.00001;
-static constexpr double MIN_AUTO_SLAB_VOLFACTOR = 1.0;
 
 namespace {
 
@@ -192,50 +188,6 @@ void KSpace::two_charge()
   two_charge_force = force->qqr2e *
     (force->qelectron * force->qelectron) /
     (force->angstrom * force->angstrom);
-}
-
-/* ----------------------------------------------------------------------
-   estimate the Ewald splitting parameter used by Ewald/PPPM
-------------------------------------------------------------------------- */
-
-double KSpace::estimate_gewald(double cutoff, double xprd, double yprd, double zprd,
-                               bigint natoms) const
-{
-  if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
-  if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
-
-  double gewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
-  if (gewald >= 1.0)
-    gewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
-  else
-    gewald = sqrt(-log(gewald)) / cutoff;
-
-  return gewald;
-}
-
-/* ----------------------------------------------------------------------
-   select slab volfactor from the homogeneous quasi-2D error estimate
-------------------------------------------------------------------------- */
-
-bool KSpace::update_auto_slab_volfactor(double alpha, double xprd, double yprd, double zprd)
-{
-  if (!(slabflag == 1 && slab_auto)) return false;
-  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
-
-  const double force_tolerance = accuracy / two_charge_force;
-  if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
-    error->all(FLERR,
-               "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
-
-  const double logeps = log(1.0 / force_tolerance);
-  const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
-  const double reciprocal = sqrt(logeps) / alpha;
-  const double lz = zprd + MAX(lateral, reciprocal);
-  const double new_volfactor = MAX(lz / zprd, MIN_AUTO_SLAB_VOLFACTOR);
-  const bool changed = fabs(new_volfactor - slab_volfactor) > SMALL * new_volfactor;
-
-  slab_volfactor = new_volfactor;
-  return changed;
 }
 
 /* ---------------------------------------------------------------------- */

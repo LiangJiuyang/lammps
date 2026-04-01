@@ -50,6 +50,41 @@ static constexpr double SMALL = 0.00001;
 static constexpr double EPS_HOC = 1.0e-7;
 static constexpr FFT_SCALAR ZEROF = 0.0;
 
+namespace {
+
+double estimate_gewald(double accuracy, double q2, double cutoff, double xprd, double yprd,
+                       double zprd, bigint natoms, Error *error)
+{
+  if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
+  if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
+
+  double gewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
+  if (gewald >= 1.0)
+    gewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
+  else
+    gewald = sqrt(-log(gewald)) / cutoff;
+
+  return gewald;
+}
+
+double auto_slab_volfactor(double accuracy, double two_charge_force, double alpha, double xprd,
+                           double yprd, double zprd, Error *error)
+{
+  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
+
+  const double force_tolerance = accuracy / two_charge_force;
+  if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
+    error->all(FLERR,
+               "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
+
+  const double logeps = log(1.0 / force_tolerance);
+  const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
+  const double reciprocal = sqrt(logeps) / alpha;
+  return MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
+}
+
+}    // namespace
+
 /* ---------------------------------------------------------------------- */
 
 PPPM::PPPM(LAMMPS *lmp) : KSpace(lmp),
@@ -288,12 +323,14 @@ void PPPM::init()
 
   g_ewald_ready = 0;
   if (!gewaldflag) {
-    g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
+    g_ewald = estimate_gewald(accuracy, q2, cutoff, xprd, yprd, zprd, natoms, error);
     g_ewald_ready = 1;
   }
 
   const bool slab_auto_enabled = (slabflag == 1 && slab_auto);
-  if (slab_auto_enabled) update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
+  if (slab_auto_enabled)
+    slab_volfactor = auto_slab_volfactor(accuracy, two_charge_force, g_ewald, xprd, yprd, zprd,
+                                         error);
 
   // setup FFT grid resolution and g_ewald
   // normally one iteration thru while loop is all that is required
@@ -352,8 +389,10 @@ void PPPM::init()
     if (!slab_auto_enabled) break;
 
     const double old_slab_volfactor = slab_volfactor;
-    update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
-    if (fabs(slab_volfactor - old_slab_volfactor) <= SMALL * slab_volfactor) break;
+    const double new_slab_volfactor = auto_slab_volfactor(accuracy, two_charge_force, g_ewald,
+                                                          xprd, yprd, zprd, error);
+    if (fabs(new_slab_volfactor - old_slab_volfactor) <= SMALL * new_slab_volfactor) break;
+    slab_volfactor = new_slab_volfactor;
 
     slab_iterations++;
     if (slab_iterations > 5)
@@ -1026,7 +1065,8 @@ void PPPM::set_grid_global()
   bigint natoms = atom->natoms;
   if (natoms == 0) natoms = 1;
 
-  if (!gewaldflag && !g_ewald_ready) g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
+  if (!gewaldflag && !g_ewald_ready)
+    g_ewald = estimate_gewald(accuracy, q2, cutoff, xprd, yprd, zprd, natoms, error);
 
   // set optimal nx_pppm,ny_pppm,nz_pppm based on order and accuracy
   // nz_pppm uses extended zprd_slab instead of zprd

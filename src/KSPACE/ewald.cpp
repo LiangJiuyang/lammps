@@ -37,6 +37,41 @@ using namespace MathConst;
 
 static constexpr double SMALL = 0.00001;
 
+namespace {
+
+double estimate_gewald(double accuracy, double q2, double cutoff, double xprd, double yprd,
+                       double zprd, bigint natoms, Error *error)
+{
+  if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
+  if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
+
+  double gewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
+  if (gewald >= 1.0)
+    gewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
+  else
+    gewald = sqrt(-log(gewald)) / cutoff;
+
+  return gewald;
+}
+
+double auto_slab_volfactor(double accuracy, double two_charge_force, double alpha, double xprd,
+                           double yprd, double zprd, Error *error)
+{
+  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
+
+  const double force_tolerance = accuracy / two_charge_force;
+  if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
+    error->all(FLERR,
+               "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
+
+  const double logeps = log(1.0 / force_tolerance);
+  const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
+  const double reciprocal = sqrt(logeps) / alpha;
+  return MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
+}
+
+}    // namespace
+
 /* ---------------------------------------------------------------------- */
 
 Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
@@ -161,8 +196,9 @@ void Ewald::init()
   // fluid-occupied volume used to estimate real-space error
   // zprd used rather than zprd_slab
 
-  if (!gewaldflag) g_ewald = estimate_gewald(cutoff, xprd, yprd, zprd, natoms);
-  if (slabflag == 1 && slab_auto) update_auto_slab_volfactor(g_ewald, xprd, yprd, zprd);
+  if (!gewaldflag) g_ewald = estimate_gewald(accuracy, q2, cutoff, xprd, yprd, zprd, natoms, error);
+  if (slabflag == 1 && slab_auto)
+    slab_volfactor = auto_slab_volfactor(accuracy, two_charge_force, g_ewald, xprd, yprd, zprd, error);
   double zprd_slab = zprd*slab_volfactor;
 
   // setup Ewald coefficients so can print stats

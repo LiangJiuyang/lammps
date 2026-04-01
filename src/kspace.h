@@ -250,8 +250,6 @@ class KSpace : protected Pointers {
           vflag_global = vflag_atom = 0;
   }
   void ev_setup(int, int, int alloc = 1);
-  double estimate_gewald(double, double, double, double, bigint) const;
-  bool update_auto_slab_volfactor(double, double, double, double);
   double estimate_table_accuracy(double, double);
 };
 
