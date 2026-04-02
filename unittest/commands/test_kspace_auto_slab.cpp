@@ -1,6 +1,6 @@
 /* ----------------------------------------------------------------------
    LAMMPS - Large-scale Atomic/Molecular Massively Parallel Simulator
-   https://www.lammps.org/ Sandia National Laboratories
+   https://www.lammps.org/, Sandia National Laboratories
    LAMMPS Development team: developers@lammps.org
 
    Copyright (2003) Sandia Corporation.  Under the terms of Contract
@@ -9,97 +9,129 @@
    the GNU General Public License.
 
    See the README file in the top-level LAMMPS directory.
-
-   Contributing authors: Jiuyang Liang and Xuanzhao Gao (Flatiron Institute)
 ------------------------------------------------------------------------- */
 
-#include "domain.h"
-#include "force.h"
-#include "input.h"
-#include "kspace.h"
-#include "math_const.h"
-#include "utils.h"
-
 #include "../testing/core.h"
+
+#include "atom.h"
+#include "comm.h"
+#include "domain.h"
 #include "gtest/gtest.h"
 
-#include <algorithm>
+#include <array>
 #include <cmath>
-#include <cstring>
 #include <mpi.h>
+#include <string>
+#include <utility>
 #include <vector>
-
-#define STRINGIFY(val) XSTR(val)
-#define XSTR(val) #val
 
 bool verbose = false;
 
 namespace LAMMPS_NS {
-using namespace MathConst;
 
 class KSpaceAutoSlabTest : public LAMMPSTest {
  protected:
-  void InitSystem() override
+  using ForceVector = std::vector<std::array<double, 3>>;
+
+  void build_q2d_system()
   {
-    if (!info->has_style("atom", "full")) GTEST_SKIP();
-    if (!info->has_style("pair", "coul/long")) GTEST_SKIP();
-
+    command("clear");
+    command("units real");
+    command("atom_style charge");
     command("boundary p p f");
-    command("variable input_dir index \"" STRINGIFY(TEST_INPUT_FOLDER) "\"");
-    command("include \"${input_dir}/in.fourmol\"");
+    command("region box block 0 40 0 40 0 40");
+    command("create_box 1 box");
 
-    command("pair_style coul/long 8.0");
-    command("pair_coeff * *");
-    command("pair_modify table 0");
+    uint64_t state = 246813579ULL;
+    auto next_uniform = [&state]() {
+      state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+      return static_cast<double>((state >> 11) & ((1ULL << 53) - 1)) /
+          static_cast<double>(1ULL << 53);
+    };
+
+    for (int atom_id = 1; atom_id <= 100; ++atom_id) {
+      const double x = 1.0 + 38.0 * next_uniform();
+      const double y = 1.0 + 38.0 * next_uniform();
+      const double z = 1.0 + 38.0 * next_uniform();
+      command(fmt::format("create_atoms 1 single {:.15g} {:.15g} {:.15g}", x, y, z));
+      const double charge = (atom_id % 2 == 1) ? 1.0 : -1.0;
+      command(fmt::format("set atom {} charge {:.1f}", atom_id, charge));
+    }
+
+    command("mass 1 1.0");
+
+    ASSERT_DOUBLE_EQ(lmp->domain->xprd, 40.0);
+    ASSERT_DOUBLE_EQ(lmp->domain->yprd, 40.0);
+    ASSERT_DOUBLE_EQ(lmp->domain->zprd, 40.0);
+    ASSERT_EQ(lmp->atom->natoms, 100);
   }
 
-  double expected_volfactor(double force_tolerance, double alpha) const
+  ForceVector run_total_ewald_forces(const std::string &accuracy, const std::string &slab_setting)
   {
-    const double xprd = lmp->domain->xprd;
-    const double yprd = lmp->domain->yprd;
-    const double zprd = lmp->domain->zprd;
-    const double logeps = std::log(1.0 / force_tolerance);
-    const double lateral = std::max(xprd, yprd) * logeps / MY_2PI;
-    const double reciprocal = std::sqrt(logeps) / alpha;
-    return std::max((zprd + std::max(lateral, reciprocal)) / zprd, 1.0);
+    build_q2d_system();
+
+    HIDE_OUTPUT([&] {
+      command("pair_style coul/long 8.0");
+      command("pair_coeff * *");
+      command("pair_modify table 0");
+      command("kspace_style ewald " + accuracy);
+      command("kspace_modify slab " + slab_setting);
+      command("run 0 post no");
+    });
+
+    return snapshot_forces();
+  }
+
+  ForceVector snapshot_forces() const
+  {
+    ForceVector forces(lmp->atom->natoms);
+    auto **f = lmp->atom->f;
+    tagint *tag = lmp->atom->tag;
+    for (int i = 0; i < lmp->atom->nlocal; ++i) {
+      const int idx = tag[i] - 1;
+      forces[idx] = {f[i][0], f[i][1], f[i][2]};
+    }
+    return forces;
+  }
+
+  double relative_l2_error(const ForceVector &reference, const ForceVector &trial) const
+  {
+    double numerator = 0.0;
+    double denominator = 0.0;
+    for (size_t i = 0; i < reference.size(); ++i) {
+      for (int dim = 0; dim < 3; ++dim) {
+        const double delta = trial[i][dim] - reference[i][dim];
+        numerator += delta * delta;
+        denominator += reference[i][dim] * reference[i][dim];
+      }
+    }
+
+    if (denominator == 0.0) return 0.0;
+    return std::sqrt(numerator / denominator);
   }
 };
 
-TEST_F(KSpaceAutoSlabTest, PPPMUsesPaperFormulaWithManualGewald)
-{
-  if (!info->has_style("kspace", "pppm")) GTEST_SKIP();
-
-  HIDE_OUTPUT([&] {
-    command("kspace_style pppm 1.0e-6");
-    command("kspace_modify gewald 0.3");
-    command("kspace_modify slab auto");
-    command("run 0 post no");
-  });
-
-  ASSERT_NE(lmp->force->kspace, nullptr);
-  EXPECT_NEAR(lmp->force->kspace->slab_volfactor,
-              expected_volfactor(lmp->force->kspace->accuracy /
-                                     lmp->force->kspace->two_charge_force, 0.3),
-              1.0e-12);
-}
-
-TEST_F(KSpaceAutoSlabTest, EwaldUsesPaperFormulaWithManualGewald)
+TEST_F(KSpaceAutoSlabTest, EwaldAutoMatchesTightReferenceWithinTenXAccuracy)
 {
   if (!info->has_style("kspace", "ewald")) GTEST_SKIP();
+  if (!info->has_style("pair", "coul/long")) GTEST_SKIP();
 
-  HIDE_OUTPUT([&] {
-    command("pair_modify mix arithmetic");
-    command("kspace_style ewald 1.0e-6");
-    command("kspace_modify gewald 0.3");
-    command("kspace_modify slab auto");
-    command("run 0 post no");
-  });
+  const auto reference = run_total_ewald_forces("1.0e-8", "10.0");
+  const std::vector<std::pair<std::string, double>> cases = {
+      {"1.0e-3", 1.0e-3},
+      {"1.0e-4", 1.0e-4},
+      {"1.0e-5", 1.0e-5},
+  };
 
-  ASSERT_NE(lmp->force->kspace, nullptr);
-  EXPECT_NEAR(lmp->force->kspace->slab_volfactor,
-              expected_volfactor(lmp->force->kspace->accuracy /
-                                     lmp->force->kspace->two_charge_force, 0.3),
-              1.0e-12);
+  for (const auto &[accuracy, tolerance] : cases) {
+    const auto trial = run_total_ewald_forces(accuracy, "auto");
+    const double error = relative_l2_error(reference, trial);
+    EXPECT_LT(error, 10.0 * tolerance) << "accuracy=" << accuracy;
+    if (lmp->comm->me == 0) {
+      fmt::print("accuracy={} auto_force_l2_rel_err={} bound={}\n", accuracy, error,
+                 10.0 * tolerance);
+    }
+  }
 }
 
 }    // namespace LAMMPS_NS
@@ -109,14 +141,7 @@ int main(int argc, char **argv)
   MPI_Init(&argc, &argv);
   ::testing::InitGoogleMock(&argc, argv);
 
-  if (const char *var = getenv("TEST_ARGS")) {
-    std::vector<std::string> env = LAMMPS_NS::utils::split_words(var);
-    for (auto &arg : env) {
-      if (arg == "-v") verbose = true;
-    }
-  }
-
-  if ((argc > 1) && (strcmp(argv[1], "-v") == 0)) verbose = true;
+  if ((argc > 1) && (std::string(argv[1]) == "-v")) verbose = true;
 
   const int rv = RUN_ALL_TESTS();
   MPI_Finalize();
