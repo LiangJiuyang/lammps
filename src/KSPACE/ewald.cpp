@@ -172,7 +172,7 @@ void Ewald::init()
   }
   if (slabflag == 1 && slab_auto) {
     if (g_ewald <= 0.0)
-      error->all(FLERR,"kspace_modify slab auto requires a positive Gewald");
+      error->all(FLERR,"kspace_modify slab auto requires a positive gewald");
 
     const double force_tolerance = accuracy / two_charge_force;
     if (!(force_tolerance > 0.0 && force_tolerance < 1.0))

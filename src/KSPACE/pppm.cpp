@@ -54,7 +54,7 @@ static inline double auto_slab_volfactor(double accuracy, double two_charge_forc
                                          double alpha, double xprd, double yprd, double zprd,
                                          Error *error)
 {
-  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
+  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive gewald");
 
   const double force_tolerance = accuracy / two_charge_force;
   if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
