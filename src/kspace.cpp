@@ -30,21 +30,6 @@
 using namespace LAMMPS_NS;
 static constexpr double SMALL = 0.00001;
 
-namespace {
-
-bool supports_auto_slab(const char *style)
-{
-  if (style == nullptr) return false;
-  return (strcmp(style, "ewald") == 0) || (strcmp(style, "ewald/omp") == 0) ||
-      (strcmp(style, "pppm") == 0) || (strcmp(style, "pppm/omp") == 0) ||
-      (strcmp(style, "pppm/gpu") == 0) || (strcmp(style, "pppm/intel") == 0) ||
-      (strcmp(style, "pppm/cg") == 0) || (strcmp(style, "pppm/cg/omp") == 0) ||
-      (strcmp(style, "pppm/tip4p") == 0) || (strcmp(style, "pppm/tip4p/omp") == 0) ||
-      (strcmp(style, "pppm/stagger") == 0);
-}
-
-}    // namespace
-
 /* ---------------------------------------------------------------------- */
 
 KSpace::KSpace(LAMMPS *lmp) :
@@ -526,7 +511,7 @@ void KSpace::modify_params(int narg, char **arg)
         slabflag = 3;
         slab_auto = 0;
       } else if (strcmp(arg[iarg+1],"auto") == 0) {
-        if (!supports_auto_slab(force->kspace_style))
+        if (!(ewaldflag || pppmflag) || dispersionflag || dipoleflag || spinflag)
           error->all(FLERR, iarg + 1,
                      "kspace_modify slab auto is not supported by kspace style {}",
                      force->kspace_style);

@@ -50,25 +50,9 @@ static constexpr double SMALL = 0.00001;
 static constexpr double EPS_HOC = 1.0e-7;
 static constexpr FFT_SCALAR ZEROF = 0.0;
 
-namespace {
-
-double estimate_gewald(double accuracy, double q2, double cutoff, double xprd, double yprd,
-                       double zprd, bigint natoms, Error *error)
-{
-  if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
-  if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
-
-  double gewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
-  if (gewald >= 1.0)
-    gewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
-  else
-    gewald = sqrt(-log(gewald)) / cutoff;
-
-  return gewald;
-}
-
-double auto_slab_volfactor(double accuracy, double two_charge_force, double alpha, double xprd,
-                           double yprd, double zprd, Error *error)
+static inline double auto_slab_volfactor(double accuracy, double two_charge_force,
+                                         double alpha, double xprd, double yprd, double zprd,
+                                         Error *error)
 {
   if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
 
@@ -82,8 +66,6 @@ double auto_slab_volfactor(double accuracy, double two_charge_force, double alph
   const double reciprocal = sqrt(logeps) / alpha;
   return MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
 }
-
-}    // namespace
 
 /* ---------------------------------------------------------------------- */
 
@@ -323,7 +305,14 @@ void PPPM::init()
 
   g_ewald_ready = 0;
   if (!gewaldflag) {
-    g_ewald = estimate_gewald(accuracy, q2, cutoff, xprd, yprd, zprd, natoms, error);
+    if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
+    if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
+
+    g_ewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
+    if (g_ewald >= 1.0)
+      g_ewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
+    else
+      g_ewald = sqrt(-log(g_ewald)) / cutoff;
     g_ewald_ready = 1;
   }
 
@@ -1065,8 +1054,16 @@ void PPPM::set_grid_global()
   bigint natoms = atom->natoms;
   if (natoms == 0) natoms = 1;
 
-  if (!gewaldflag && !g_ewald_ready)
-    g_ewald = estimate_gewald(accuracy, q2, cutoff, xprd, yprd, zprd, natoms, error);
+  if (!gewaldflag && !g_ewald_ready) {
+    if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
+    if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
+
+    g_ewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
+    if (g_ewald >= 1.0)
+      g_ewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
+    else
+      g_ewald = sqrt(-log(g_ewald)) / cutoff;
+  }
 
   // set optimal nx_pppm,ny_pppm,nz_pppm based on order and accuracy
   // nz_pppm uses extended zprd_slab instead of zprd
