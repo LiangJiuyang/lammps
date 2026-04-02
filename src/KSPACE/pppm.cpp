@@ -305,14 +305,13 @@ void PPPM::init()
 
   g_ewald_ready = 0;
   if (!gewaldflag) {
-    if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
-    if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
-
-    g_ewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
-    if (g_ewald >= 1.0)
-      g_ewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
-    else
-      g_ewald = sqrt(-log(g_ewald)) / cutoff;
+    if (accuracy <= 0.0)
+      error->all(FLERR,"KSpace accuracy must be > 0");
+    if (q2 == 0.0)
+      error->all(FLERR,"Must use 'kspace_modify gewald' for uncharged system");
+    g_ewald = accuracy*sqrt(natoms*cutoff*xprd*yprd*zprd) / (2.0*q2);
+    if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
+    else g_ewald = sqrt(-log(g_ewald)) / cutoff;
     g_ewald_ready = 1;
   }
 
@@ -1055,14 +1054,13 @@ void PPPM::set_grid_global()
   if (natoms == 0) natoms = 1;
 
   if (!gewaldflag && !g_ewald_ready) {
-    if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
-    if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
-
-    g_ewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
-    if (g_ewald >= 1.0)
-      g_ewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
-    else
-      g_ewald = sqrt(-log(g_ewald)) / cutoff;
+    if (accuracy <= 0.0)
+      error->all(FLERR,"KSpace accuracy must be > 0");
+    if (q2 == 0.0)
+      error->all(FLERR,"Must use 'kspace_modify gewald' for uncharged system");
+    g_ewald = accuracy*sqrt(natoms*cutoff*xprd*yprd*zprd) / (2.0*q2);
+    if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
+    else g_ewald = sqrt(-log(g_ewald)) / cutoff;
   }
 
   // set optimal nx_pppm,ny_pppm,nz_pppm based on order and accuracy

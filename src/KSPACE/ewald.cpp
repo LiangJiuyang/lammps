@@ -37,23 +37,6 @@ using namespace MathConst;
 
 static constexpr double SMALL = 0.00001;
 
-static inline double auto_slab_volfactor(double accuracy, double two_charge_force,
-                                         double alpha, double xprd, double yprd, double zprd,
-                                         Error *error)
-{
-  if (alpha <= 0.0) error->all(FLERR, "kspace_modify slab auto requires a positive Gewald");
-
-  const double force_tolerance = accuracy / two_charge_force;
-  if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
-    error->all(FLERR,
-               "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
-
-  const double logeps = log(1.0 / force_tolerance);
-  const double lateral = MAX(xprd, yprd) * logeps / MY_2PI;
-  const double reciprocal = sqrt(logeps) / alpha;
-  return MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
-}
-
 /* ---------------------------------------------------------------------- */
 
 Ewald::Ewald(LAMMPS *lmp) : KSpace(lmp),
@@ -179,17 +162,28 @@ void Ewald::init()
   // zprd used rather than zprd_slab
 
   if (!gewaldflag) {
-    if (accuracy <= 0.0) error->all(FLERR, "KSpace accuracy must be > 0");
-    if (q2 == 0.0) error->all(FLERR, "Must use 'kspace_modify gewald' for uncharged system");
-
-    g_ewald = accuracy * sqrt(natoms * cutoff * xprd * yprd * zprd) / (2.0 * q2);
-    if (g_ewald >= 1.0)
-      g_ewald = (1.35 - 0.15 * log(accuracy)) / cutoff;
-    else
-      g_ewald = sqrt(-log(g_ewald)) / cutoff;
+    if (accuracy <= 0.0)
+      error->all(FLERR,"KSpace accuracy must be > 0");
+    if (q2 == 0.0)
+      error->all(FLERR,"Must use 'kspace_modify gewald' for uncharged system");
+    g_ewald = accuracy*sqrt(natoms*cutoff*xprd*yprd*zprd) / (2.0*q2);
+    if (g_ewald >= 1.0) g_ewald = (1.35 - 0.15*log(accuracy))/cutoff;
+    else g_ewald = sqrt(-log(g_ewald)) / cutoff;
   }
-  if (slabflag == 1 && slab_auto)
-    slab_volfactor = auto_slab_volfactor(accuracy, two_charge_force, g_ewald, xprd, yprd, zprd, error);
+  if (slabflag == 1 && slab_auto) {
+    if (g_ewald <= 0.0)
+      error->all(FLERR,"kspace_modify slab auto requires a positive Gewald");
+
+    const double force_tolerance = accuracy / two_charge_force;
+    if (!(force_tolerance > 0.0 && force_tolerance < 1.0))
+      error->all(FLERR,
+                 "kspace_modify slab auto requires a normalized force tolerance between 0 and 1");
+
+    const double logeps = log(1.0 / force_tolerance);
+    const double lateral = MAX(xprd,yprd) * logeps / MY_2PI;
+    const double reciprocal = sqrt(logeps) / g_ewald;
+    slab_volfactor = MAX((zprd + MAX(lateral, reciprocal)) / zprd, 1.0);
+  }
   double zprd_slab = zprd*slab_volfactor;
 
   // setup Ewald coefficients so can print stats
