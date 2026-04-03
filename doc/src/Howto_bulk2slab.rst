@@ -68,7 +68,7 @@ twice its value in each direction to the z-dimension; thus in total
 :math:`\pm 1` and thus have the minimum distance from the center of the
 simulation box, but the correct relative distance for bonded atoms.
 
-Using ``kspace_modify slab auto`` lets the solver choose the additional
+Using ``kspace_modify slab auto`` lets the solver choose the near-optimal
 virtual vacuum used by the reciprocal-space slab correction from the
 current long-range accuracy target and box geometry.  A fixed value such
 as ``slab 3.0`` can still be used if a manual override is preferred.

@@ -417,20 +417,20 @@ option is also extended to non-neutral systems :ref:`(Ballenegger)
 As an alternative to specifying a fixed volfactor, the keyword
 *auto* can be used to determine the extended z dimension from the
 current normalized force tolerance, the lateral dimensions of the
-simulation cell, and the active Coulombic G-ewald parameter.  This is
+simulation cell, and the active Coulombic gewald parameter. This is
 useful for quasi-2D systems where the amount of extra vacuum required
 for the slab correction depends on both the requested tolerance and
 the box geometry.  Here the tolerance entering the formula is made
 dimensionless by dividing the current absolute force accuracy by the
 force between two unit charges separated by 1 Angstrom in the active
-unit style.  The automatic choice is not artificially clamped
+unit style. The automatic choice is not artificially clamped
 above 1.0, so it can in principle approach the original box size if
-the formula permits.  The quasi-2D error estimate used for the
-automatic choice is discussed in :ref:`(Gan2025) <Gan2025>`.  For
-related error estimates and parameter-selection guidance in the more
-general dielectric-confined setting, see :ref:`(Gao2025) <Gao2025>`.
-The *auto* setting is currently supported by
-:doc:`kspace_style <kspace_style>` *ewald*, *pppm*,
+the formula permits. The quasi-2D error estimate used for the
+automatic choice is discussed in :ref:`(Gao2025) <Gao2025>` and
+:ref:`(Gan2025) <Gan2025>`.  For related error estimates and 
+parameter-selection guidance in the more general dielectric-confined 
+setting, see :ref:`(Gao2025) <Gao2025>`. The *auto* setting is 
+currently supported by :doc:`kspace_style <kspace_style>` *ewald*, *pppm*,
 *pppm/cg*, *pppm/tip4p*, *pppm/stagger*, and the corresponding
 OpenMP/GPU/Intel variants that reuse the same slab-correction setup.
 
